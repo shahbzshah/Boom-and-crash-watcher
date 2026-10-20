@@ -1,5 +1,6 @@
 """Tick watcher: streams Deriv ticks, tracks spikes, evaluates your rule."""
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -7,6 +8,7 @@ from collections import deque
 
 import config
 import crt_engine
+import deriv_feed
 import signals
 import structure
 import telegram_alerts
@@ -15,13 +17,20 @@ import volumatic
 
 log = logging.getLogger("crash_alert.watcher")
 
-def _ws_url():
-    return f"wss://ws.derivws.com/websockets/v3?app_id={config.DERIV_APP_ID}"
+def _quiet_connection_drops(loop, context):
+    """Drop the noisy asyncio report when the feed dies without a close
+    frame. Deriv's public gateway cuts connections every 120 seconds and
+    the websockets library logs a shielded-future traceback for it; the
+    reconnect logic below already handles the disconnect."""
+    if "exception in shielded future" in context.get("message", ""):
+        return
+    loop.default_exception_handler(context)
 
 
 class Watcher:
     def __init__(self):
         self.ticks = deque(maxlen=config.TICK_BUFFER)  # (epoch, price)
+        self.symbol = config.SYMBOL
         self.ctx = {
             "ticks_since_spike": None,
             "last_spike_price": None,
@@ -71,6 +80,11 @@ class Watcher:
         self._last_logged_phase = None
         self.armed = True
         self.last_alert_ts = 0.0
+        self._connected = False
+        self._down = True
+        self._last_status_ts = 0.0
+        self._last_notify_ts = 0.0
+        self._live_req_id = None
         # CRT Pre-Reversal Engine — Megah's actual strategy (the .mq5
         # source he sent). Evaluated on every closed candle; its own
         # cycle filter governs alert spacing, so CRT alerts bypass the
@@ -144,7 +158,7 @@ class Watcher:
             return
 
         text = telegram_alerts.format_alert(
-            config.SYMBOL, reason, price, self.ctx["ticks_since_spike"], epoch
+            self.symbol, reason, price, self.ctx["ticks_since_spike"], epoch
         )
         if telegram_alerts.send_alert(text):
             log.warning("ALERT SENT: %s", reason)
@@ -204,7 +218,7 @@ class Watcher:
         for sig in fired:
             self.ctx["crt_last_signal"] = sig
             text = telegram_alerts.format_crt_alert(
-                sig, config.SYMBOL, f"M{config.CANDLE_MINUTES}", self.ctx)
+                sig, self.symbol, f"M{config.CANDLE_MINUTES}", self.ctx)
             if telegram_alerts.send_alert(text):
                 log.warning("CRT ALERT SENT: %s score %s entry %s",
                             sig["side"], sig["score"], sig["entry"])
@@ -231,22 +245,9 @@ class Watcher:
         ~252-bar warmup instead of waiting hours. Best-effort: on any
         failure the bot simply accumulates candles live."""
         try:
-            await ws.send(json.dumps({
-                "ticks_history": config.SYMBOL,
-                "count": config.HISTORY_CANDLES,
-                "end": "latest",
-                "style": "candles",
-                "granularity": config.CANDLE_MINUTES * 60,
-            }))
-            payload = None
-            for _ in range(10):
-                raw = await asyncio.wait_for(ws.recv(), timeout=20)
-                msg = json.loads(raw)
-                if msg.get("msg_type") == "candles":
-                    payload = msg.get("candles")
-                    break
-                if "error" in msg:
-                    raise RuntimeError(msg["error"].get("message"))
+            payload = await deriv_feed.fetch_candles(
+                ws, self.symbol, config.HISTORY_CANDLES,
+                config.CANDLE_MINUTES)
             if not payload:
                 log.warning("History seed: no candles returned — "
                             "continuing live-only.")
@@ -265,30 +266,168 @@ class Watcher:
             log.warning("History seed failed (%s) — continuing live-only.",
                         exc)
 
+    # -- feed status -------------------------------------------------------
+
+    def _notify(self, icon, title, detail, repeat=False):
+        """Send a feed-status message to Telegram.
+
+        Routine reconnects stay quiet; a message is sent when the feed
+        comes back up, when it goes down, and then at most every
+        `NOTIFY_REPEAT_SEC` while it stays down.
+        """
+        if not config.NOTIFY_FEED_STATUS:
+            return
+        now = time.time()
+        if now - self._last_status_ts < 60:
+            return
+        if repeat and now - self._last_notify_ts < config.NOTIFY_REPEAT_SEC:
+            return
+        self._last_status_ts = now
+        self._last_notify_ts = now
+        text = telegram_alerts.format_status(icon, title, detail)
+        if telegram_alerts.send_alert(text):
+            log.info("Status sent: %s", title)
+        else:
+            log.error("Status message failed to send (%s).", title)
+
+    def _heartbeat(self):
+        """Periodic liveness report while the feed is up."""
+        ctx = self.ctx
+        detail = (f"Symbol: {self.symbol}\n"
+                  f"Price: {ctx.get('current_price')}\n"
+                  f"Candles closed: {ctx.get('candles_closed')}\n"
+                  f"Trend: {ctx.get('trend')} | phase: {ctx.get('phase')}\n"
+                  f"CRT score: {ctx.get('crt_sell_score')}/5")
+        log.info("Heartbeat: symbol=%s price=%s candles=%s trend=%s "
+                 "crt_sell=%s", self.symbol, ctx.get("current_price"),
+                 ctx.get("candles_closed"), ctx.get("trend"),
+                 ctx.get("crt_sell_score"))
+        if config.HEARTBEAT_SEC > 0:
+            self._notify("💓", "Bot alive", detail)
+
+    async def _heartbeat_loop(self):
+        while True:
+            await asyncio.sleep(config.HEARTBEAT_SEC)
+            self._heartbeat()
+
+    # -- connection --------------------------------------------------------
+
+    async def _open_session(self, ws, candidates):
+        """Negotiate a streamable symbol, seed history, subscribe to ticks.
+
+        Returns the symbol that was selected.
+        """
+        streamable, rejected = await deriv_feed.probe_symbols(ws, candidates)
+        if not streamable:
+            raise RuntimeError(
+                "no streamable symbol (tried %s; rejected: %s)"
+                % (", ".join(candidates), ", ".join(rejected) or "none"))
+        symbol = streamable[0]
+        if symbol != config.SYMBOL:
+            log.warning("%s is not streamable on this endpoint — using %s "
+                        "instead (set SYMBOL_FALLBACKS to allow this).",
+                        config.SYMBOL, symbol)
+        self.symbol = symbol
+        self.crt_cfg["symbol"] = symbol
+        await self._seed_history(ws)
+        self._live_req_id = await deriv_feed.subscribe_ticks(ws, symbol)
+        log.info("Subscribed to %s ticks.", symbol)
+        return symbol
+
+    async def _stream(self, ws):
+        """Consume the tick stream until the connection drops."""
+        beat = None
+        if config.HEARTBEAT_SEC > 0:
+            beat = asyncio.create_task(self._heartbeat_loop())
+        try:
+            async for raw in ws:
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if msg.get("msg_type") == "tick" and "tick" in msg:
+                    # ignore frames left over from a probe subscription
+                    req_id = msg.get("req_id")
+                    if req_id is not None and req_id != self._live_req_id:
+                        continue
+                    t = msg["tick"]
+                    if t.get("symbol") == self.symbol:
+                        self._on_tick(int(t["epoch"]), float(t["quote"]))
+                elif "error" in msg:
+                    log.error("Deriv error: %s",
+                              msg["error"].get("message"))
+        finally:
+            if beat is not None:
+                beat.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await beat
+
     async def run(self):
         import websockets
 
+        asyncio.get_running_loop().set_exception_handler(
+            _quiet_connection_drops)
+
+        endpoints = deriv_feed.parse_endpoints(config.WS_ENDPOINTS)
+        if not endpoints:
+            log.error("WS_ENDPOINTS is empty — nothing to connect to.")
+            return
+        candidates = deriv_feed.symbol_candidates(
+            config.SYMBOL, config.SYMBOL_FALLBACKS)
+
         backoff = 5
+        idx = 0
+        preferred = None
+        failures = []
         while True:
+            if idx % len(endpoints) == 0:
+                failures = []
+            endpoint = endpoints[idx % len(endpoints)]
+            url = deriv_feed.build_ws_url(endpoint, config.DERIV_APP_ID)
+            reason = "closed by Deriv"
+            live = False
             try:
-                log.info("Connecting to Deriv feed (%s)...", config.SYMBOL)
-                async with websockets.connect(_ws_url(), open_timeout=20) as ws:
-                    await self._seed_history(ws)
-                    await ws.send(json.dumps({"ticks": config.SYMBOL, "subscribe": 1}))
-                    log.info("Subscribed to %s ticks.", config.SYMBOL)
+                log.info("Connecting to Deriv feed (%s) via %s ...",
+                         config.SYMBOL, endpoint)
+                async with websockets.connect(url, open_timeout=20) as ws:
+                    symbol = await self._open_session(ws, candidates)
+                    live = True
+                    self._connected = True
+                    preferred = idx % len(endpoints)
+                    failures = []
+                    if self._down:
+                        self._down = False
+                        self._notify("✅", "Feed connected",
+                                     f"Symbol: {symbol}\nEndpoint: {endpoint}\n"
+                                     f"Strategy: CRT Pre-Reversal (crash mode)")
+                    log.info("Live on %s (%s).", symbol, endpoint)
                     backoff = 5
-                    async for raw in ws:
-                        try:
-                            msg = json.loads(raw)
-                        except json.JSONDecodeError:
-                            continue
-                        if msg.get("msg_type") == "tick" and "tick" in msg:
-                            t = msg["tick"]
-                            if t.get("symbol") == config.SYMBOL:
-                                self._on_tick(int(t["epoch"]), float(t["quote"]))
-                        elif "error" in msg:
-                            log.error("Deriv error: %s", msg["error"].get("message"))
+                    await self._stream(ws)
             except Exception as exc:
-                log.error("Feed disconnected (%s) — retrying in %ss.", exc, backoff)
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 120)
+                reason = str(exc) or type(exc).__name__
+                if live:
+                    # A working feed that closes is routine — the public
+                    # gateway cuts the connection every 120 seconds.
+                    log.info("Feed closed (%s) — reconnecting.", reason)
+                else:
+                    log.error("Feed error (%s).", reason)
+                    failures.append(f"• {endpoint}\n  {reason}")
+                    self._down = True
+                    preferred = None
+            finally:
+                if self._connected:
+                    self._connected = False
+            if failures:
+                if (idx + 1) % len(endpoints) == 0:
+                    self._notify("⚠️", "Feed unreachable",
+                                 "Tried every endpoint:\n"
+                                 + "\n".join(failures)
+                                 + f"\nRetrying in {backoff}s", repeat=True)
+                else:
+                    self._notify("⚠️", "Feed unreachable",
+                                 f"Endpoint: {endpoint}\nReason: {reason}\n"
+                                 f"Retrying in {backoff}s", repeat=True)
+            # stay on the endpoint that worked, otherwise rotate
+            idx = preferred if preferred is not None else idx + 1
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, config.RECONNECT_MAX_SEC)

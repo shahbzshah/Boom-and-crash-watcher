@@ -25,7 +25,7 @@ def main():
         log.error("Fix your .env (see .env.example), then run again.")
         sys.exit(1)
     if "--test-alert" in sys.argv:
-        # Sends one test message and exits — use to verify Telegram setup.
+        # Sends one message and exits — use to verify Telegram setup.
         import telegram_alerts
 
         ok = telegram_alerts.send_alert(

@@ -57,6 +57,11 @@ def format_alert(symbol, reason, current_price, ticks_since_spike, epoch):
     )
 
 
+def format_status(icon, title, detail):
+    """Feed-status message (connect / drop / heartbeat)."""
+    return f"{icon} <b>Crash alert bot — {title}</b>\n{detail}"
+
+
 _COND_LABELS = (("sweep", "sweep"), ("consecutive", "drift"),
                 ("rsi", "RSI"), ("stretch", "stretch"), ("move", "move"))
 

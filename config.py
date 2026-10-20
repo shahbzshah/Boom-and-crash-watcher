@@ -21,12 +21,43 @@ except ImportError:
 
 TELEGRAM_BOT_TOKEN = _get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = _get("TELEGRAM_CHAT_ID", "")
-SYMBOL = _get("SYMBOL", "R_1000")
+SYMBOL = _get("SYMBOL", "CRASH1000")
 # Deriv websocket app_id. 1089 is Deriv's public demo app — it works
 # out of the box for market data; register your own free app at
 # api.deriv.com for your own rate limits and put its id here.
 DERIV_APP_ID = _get("DERIV_APP_ID", "1089")
 SPIKE_PCT = _get("SPIKE_PCT", "0.005", float)
+
+# --- Deriv connection ---
+# Deriv renamed the synthetic symbols in its current API: Crash 1000 is
+# `CRASH1000` there, while the legacy clusters still use `R_1000`. The
+# bot probes both, so it works on either generation of the API.
+#
+# Deriv runs several regional WebSocket clusters behind one CDN and they
+# fail independently. The bot tries them in order until one answers.
+# The first entry is Deriv's public market-data gateway, which needs no
+# authentication and is the most reliable of the lot.
+WS_ENDPOINTS = _get(
+    "WS_ENDPOINTS",
+    "wss://api.derivws.com/trading/v1/options/ws/public,"
+    "wss://ws.derivws.com/websockets/v3,"
+    "wss://ws.binaryws.com/websockets/v3,"
+    "wss://green.derivws.com/websockets/v3,"
+    "wss://blue.derivws.com/websockets/v3,"
+    "wss://red.derivws.com/websockets/v3",
+    str,
+)
+# Symbols to try when the configured one cannot be streamed. The default
+# is the legacy code for the very same instrument, not a different one.
+SYMBOL_FALLBACKS = _get("SYMBOL_FALLBACKS", "R_1000", str)
+# Seconds between "bot is alive" Telegram messages (0 = off).
+HEARTBEAT_SEC = _get("HEARTBEAT_SEC", "0", int)
+# Send a Telegram message when the feed connects or drops.
+NOTIFY_FEED_STATUS = _get("NOTIFY_FEED_STATUS", "1", int)
+# Minimum seconds between two "feed unreachable" reminders.
+NOTIFY_REPEAT_SEC = _get("NOTIFY_REPEAT_SEC", "900", int)
+# Reconnect backoff ceiling in seconds.
+RECONNECT_MAX_SEC = _get("RECONNECT_MAX_SEC", "120", int)
 ALERT_COOLDOWN_SEC = _get("ALERT_COOLDOWN_SEC", "300", int)
 TICK_BUFFER = _get("TICK_BUFFER", "5000", int)
 

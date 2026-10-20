@@ -40,10 +40,42 @@ want additional per-tick conditions later).
    - `TELEGRAM_CHAT_ID` — message your bot first, then open
      `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` in a browser and
      copy the `chat.id`. (Or ask @userinfobot.)
+   - If the token was ever pasted into a chat, log, or screenshot, revoke
+     it in @BotFather (`/revoke`) and put the new one in `.env` — treat
+     an exposed token as compromised.
 4. The strategy is already encoded (`crt_engine.py`) with your MQL
    defaults — only touch the `CRT_*` values in `.env` if your MT5 chart
    runs different inputs.
 5. Run: `python run.py` — leave it running while you trade.
+
+## Feed resilience
+
+Deriv renamed the synthetic symbols when it moved to its current API:
+Crash 1000 is `CRASH1000` there, while the older clusters still call it
+`R_1000`. The bot probes both, so it works on either generation.
+
+Deriv also publishes several WebSocket endpoints behind one CDN, and they
+fail independently — a cluster can answer `ping` while refusing every
+tick subscription. The bot therefore does not trust any single one:
+
+- **Endpoint failover** — `WS_ENDPOINTS` (comma separated) is tried in
+  order. Deriv's public market-data gateway
+  (`wss://api.derivws.com/trading/v1/options/ws/public`, no
+  authentication needed) is listed first because it is the most
+  reliable; the legacy clusters follow as backup.
+- **Symbol negotiation** — after connecting, the bot probes the
+  candidate symbols with a throwaway tick subscription and keeps the
+  first one the endpoint can actually stream. `SYMBOL` is tried first,
+  then `SYMBOL_FALLBACKS` (`R_1000` — the legacy code for the *same*
+  instrument, not a different one).
+- **Short-lived connections** — the public gateway closes a connection
+  after 120 seconds. The bot treats that as routine: it reconnects to the
+  endpoint that just worked, without sending a message.
+- **Status messages** — with `NOTIFY_FEED_STATUS=1` the bot tells
+  Telegram when the feed comes up and when it stays unreachable (at most
+  every `NOTIFY_REPEAT_SEC`, 15 minutes by default).
+  `HEARTBEAT_SEC` (default `0`, off) adds a periodic "bot is alive"
+  message with price, trend and the current CRT score.
 
 ## The rule context (`ctx`)
 
@@ -87,12 +119,14 @@ Your rule also sees the market-structure block in `ctx` (see `structure.py`):
 
 ## Files
 
-- `run.py` — main loop: connects to Deriv, subscribes to R_1000 ticks,
-  reconnects automatically if the feed drops. `python run.py --test-alert`
-  sends one Telegram test message and exits.
+- `run.py` — main loop: connects to Deriv, subscribes to the crash
+  ticks, reconnects automatically if the feed drops.
+  `python run.py --test-alert` sends one Telegram test message and exits.
 - `watcher.py` — tick buffer + spike tracking; rebuilds candles on each
   tick, seeds history at startup, and runs the CRT engine on every
-  candle close.
+  candle close. Owns the endpoint failover loop and the status messages.
+- `deriv_feed.py` — Deriv WebSocket helpers: endpoint URL building,
+  symbol probing/negotiation, candle fetching.
 - `crt_engine.py` — **your strategy**: the CRT Pre-Reversal Engine port
   (exhaustion score, spike-cycle filter, SL/TP risk engine).
 - `structure.py` — market-structure engine: candles from ticks, fractal
@@ -100,5 +134,5 @@ Your rule also sees the market-structure block in `ctx` (see `structure.py`):
 - `signals.py` — optional extra per-tick rule hook (ships OFF).
 - `telegram_alerts.py` — sends the Telegram message.
 - `config.py` — reads `.env`.
-- `test_*.py` — offline test suites (42 tests).
+- `test_*.py` — offline test suites (62 tests).
 - `alert_bot.log` — log file (created on first run).
