@@ -22,6 +22,10 @@ except ImportError:
 TELEGRAM_BOT_TOKEN = _get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = _get("TELEGRAM_CHAT_ID", "")
 SYMBOL = _get("SYMBOL", "R_1000")
+# Deriv websocket app_id. 1089 is Deriv's public demo app — it works
+# out of the box for market data; register your own free app at
+# api.deriv.com for your own rate limits and put its id here.
+DERIV_APP_ID = _get("DERIV_APP_ID", "1089")
 SPIKE_PCT = _get("SPIKE_PCT", "0.005", float)
 ALERT_COOLDOWN_SEC = _get("ALERT_COOLDOWN_SEC", "300", int)
 TICK_BUFFER = _get("TICK_BUFFER", "5000", int)

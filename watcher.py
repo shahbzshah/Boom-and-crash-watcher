@@ -15,7 +15,8 @@ import volumatic
 
 log = logging.getLogger("crash_alert.watcher")
 
-_WS_URL = "wss://ws.derivws.com/websockets/v3?app_id=1089"
+def _ws_url():
+    return f"wss://ws.derivws.com/websockets/v3?app_id={config.DERIV_APP_ID}"
 
 
 class Watcher:
@@ -271,7 +272,7 @@ class Watcher:
         while True:
             try:
                 log.info("Connecting to Deriv feed (%s)...", config.SYMBOL)
-                async with websockets.connect(_WS_URL, open_timeout=20) as ws:
+                async with websockets.connect(_ws_url(), open_timeout=20) as ws:
                     await self._seed_history(ws)
                     await ws.send(json.dumps({"ticks": config.SYMBOL, "subscribe": 1}))
                     log.info("Subscribed to %s ticks.", config.SYMBOL)
