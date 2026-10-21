@@ -113,7 +113,7 @@ def test_dashboard_routes_and_key_gate():
     server = health.start(0, lambda: True,
                           status_provider=lambda: {"x": 1},
                           page_html="<html>dash</html>",
-                          test_alert=lambda: True,
+                          test_alert=lambda: (False, "chat not found"),
                           dashboard_key="sekret")
     try:
         with _req(server, "/") as resp:
@@ -135,10 +135,11 @@ def test_dashboard_routes_and_key_gate():
         with _req(server, "/ping") as resp:
             assert resp.status == 200
         assert health.last_ping() is not None
-        # test alert, key-gated POST
+        # test alert, key-gated POST, detail passes through
         with _req(server, "/test-alert", key="sekret",
                   method="POST") as resp:
-            assert json.loads(resp.read()) == {"sent": True}
+            assert json.loads(resp.read()) == {
+                "sent": False, "detail": "chat not found"}
         # health JSON unchanged
         with _req(server, "/health") as resp:
             assert json.loads(resp.read()) == {

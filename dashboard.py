@@ -375,8 +375,10 @@ function histRow(r, expandable){
 function render(){
   /* header */
   const live=S.connected;
+  const reconn= !live && S.system.last_drop_epoch && (S.now - S.system.last_drop_epoch) < 30;
   $("fdot").className="dot"+(live?" live":" down");
-  $("flabel").textContent= live? "FEED LIVE" : "FEED DOWN";
+  $("fdot").style.background= reconn? "var(--rust)" : "";
+  $("flabel").textContent= live? "FEED LIVE" : (reconn? "RECONNECTING" : "FEED DOWN");
   $("fclock").textContent="· "+eatFmt.format(new Date())+" EAT";
   /* hero */
   $("h-sym").textContent=(S.symbol==="CRASH1000"?"CRASH 1000":S.symbol)+" · DERIV · "+S.config.timeframe;
@@ -429,7 +431,7 @@ function render(){
   $("st-foot").textContent="Deriv "+S.symbol+" · CRT Pre-Reversal · Sync "+(S.now_eat||"")+" EAT";
   renderHistory();
   /* config view */
-  $("cf-conn").textContent= live? "CONNECTED" : "DOWN";
+  $("cf-conn").textContent= live? "CONNECTED" : (reconn? "RECONNECTING" : "DOWN");
   $("cf-url").textContent= S.endpoint_url || "— (not connected yet)";
   const kv=(k,v)=> '<div class="kv"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>';
   $("cf-conn-rows").innerHTML =
@@ -523,7 +525,8 @@ $("btn-test").onclick=async()=>{
   try{
     const r=await fetch("/test-alert",{method:"POST",headers:{"X-Dash-Key":KEY}});
     const j=await r.json();
-    toast(j.sent? "Test alert sent — check Telegram." : "Send failed — check the bot logs.");
+    toast(j.sent? "Test alert sent — check Telegram."
+      : "Send failed: "+(j.detail || "unknown error")+" — tell Ziggy this message.");
   }catch(e){ toast("Could not reach the bot."); }
   b.disabled=false;
 };

@@ -23,10 +23,12 @@ log = logging.getLogger("crash_alert")
 
 
 def _dashboard_test_alert():
-    """The dashboard's Send-test-alert button: one Telegram message."""
+    """The dashboard's Send-test-alert button: one Telegram message.
+    Returns (sent, detail) so the page can show Telegram's own error
+    description when delivery fails."""
     import telegram_alerts
 
-    return telegram_alerts.send_alert(
+    return telegram_alerts.send_alert_detailed(
         "🧪 <b>Crash Watch</b>\nTest alert from the dashboard — "
         "delivery works.")
 

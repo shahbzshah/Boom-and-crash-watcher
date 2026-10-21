@@ -1,6 +1,7 @@
 """Sends alert messages through the user's own Telegram bot."""
 import json
 import logging
+import urllib.error
 import urllib.request
 
 import config
@@ -10,11 +11,23 @@ log = logging.getLogger("crash_alert.telegram")
 _API = "https://api.telegram.org/bot{token}/sendMessage"
 
 
-def send_alert(text):
-    """Send `text` to the configured chat. Returns True on success."""
+def _clean(detail):
+    """Never let the bot token leak into an error string."""
+    token = config.TELEGRAM_BOT_TOKEN
+    text = str(detail)
+    if token and token in text:
+        text = text.replace(token, "***")
+    return text
+
+
+def send_alert_detailed(text):
+    """Send `text` to the configured chat. Returns (ok, detail) where
+    detail is Telegram's own error description on failure — the thing
+    that tells you whether the token is wrong, the chat id is wrong,
+    or the user never started the bot."""
     if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
         log.error("Telegram not configured — alert dropped: %s", text[:80])
-        return False
+        return False, "Telegram is not configured on the server."
     payload = json.dumps(
         {
             "chat_id": config.TELEGRAM_CHAT_ID,
@@ -35,10 +48,28 @@ def send_alert(text):
             ok = bool(body.get("ok"))
             if not ok:
                 log.error("Telegram API error: %s", body)
-            return ok
-    except Exception as exc:  # network / HTTP errors
+                return False, _clean(body.get("description")
+                                     or "Telegram rejected the message.")
+            return True, "sent"
+    except urllib.error.HTTPError as exc:
+        detail = f"HTTP {exc.code}"
+        try:
+            body = json.loads(exc.read().decode("utf-8"))
+            if body.get("description"):
+                detail = body["description"]
+        except Exception:
+            pass
+        log.error("Telegram send failed: %s", detail)
+        return False, _clean(detail)
+    except Exception as exc:  # network errors
         log.error("Telegram send failed: %s", exc)
-        return False
+        return False, _clean(f"Network error: {exc}")
+
+
+def send_alert(text):
+    """Send `text` to the configured chat. Returns True on success."""
+    ok, _ = send_alert_detailed(text)
+    return ok
 
 
 def format_alert(symbol, reason, current_price, ticks_since_spike, epoch):

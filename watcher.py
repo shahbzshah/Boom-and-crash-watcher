@@ -434,6 +434,8 @@ class Watcher:
                 "uptime_sec": max(0, now - int(self.started_at)),
                 "last_connect_eat": full(self.last_connect_epoch),
                 "last_drop_eat": full(self.last_drop_epoch),
+                "last_connect_epoch": self.last_connect_epoch,
+                "last_drop_epoch": self.last_drop_epoch,
                 "host": "Render · Frankfurt",
                 "last_ping_ago_sec": (now - ping) if ping else None,
             },
@@ -650,5 +652,8 @@ class Watcher:
                                  f"Retrying in {backoff}s", repeat=True)
             # stay on the endpoint that worked, otherwise rotate
             idx = preferred if preferred is not None else idx + 1
-            await asyncio.sleep(backoff)
+            # A feed that was live and simply closed (the public
+            # gateway cuts every ~120s) reconnects almost immediately;
+            # the backoff ladder is for feeds that never came up.
+            await asyncio.sleep(1 if live else backoff)
             backoff = min(backoff * 2, config.RECONNECT_MAX_SEC)

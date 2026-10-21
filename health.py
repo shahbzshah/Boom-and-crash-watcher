@@ -123,11 +123,16 @@ def _make_handler(feed_connected, status_provider=None, page_html=None,
                     self._send(401, b'{"error": "key required"}')
                     return
                 try:
-                    sent = bool(test_alert())
+                    result = test_alert()
+                    if isinstance(result, tuple):
+                        sent, detail = bool(result[0]), str(result[1])
+                    else:
+                        sent, detail = bool(result), ""
                 except Exception as exc:
                     log.error("test alert failed: %s", exc)
-                    sent = False
-                self._send(200, json.dumps({"sent": sent}))
+                    sent, detail = False, "Server error while sending."
+                self._send(200, json.dumps({"sent": sent,
+                                            "detail": detail}))
                 return
             self._send(404, b'{"error": "not found"}')
 
