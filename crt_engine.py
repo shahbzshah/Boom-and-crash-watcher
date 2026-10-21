@@ -218,6 +218,62 @@ def exhaustion_score(p, buy, s, cfg):
     return sum(1 for v in cond.values() if v), cond
 
 
+def score_detail(candles, cfg, buy=False):
+    """Dashboard detail for the LAST candle of `candles`: the score,
+    the five condition booleans, and the numbers behind them.
+
+    The booleans come from exhaustion_score itself, so this view can
+    never disagree with the engine; the values are recomputed with the
+    same formulas for display only.
+    """
+    out = {"score": 0,
+           "conditions": {"sweep": False, "consecutive": False,
+                          "rsi": False, "stretch": False, "move": False},
+           "rsi": None, "ema": None, "atr": None, "consecutive": 0,
+           "stretch_atr": None, "move_atr": None}
+    if not candles:
+        return out
+    s = build_series(candles, cfg)
+    p = len(candles) - 1
+    if p < 1:
+        return out
+    score, cond = exhaustion_score(p, buy, s, cfg)
+    out["score"] = score
+    out["conditions"] = cond
+    out["rsi"] = s["rsi"][p]
+    out["ema"] = s["ema"][p]
+    out["atr"] = s["atr"][p]
+    C, O, H, L = s["c"], s["o"], s["h"], s["l"]
+    cnt = 0
+    limit = cfg["min_consecutive"] + 10
+    for q in range(p, max(p - limit, -1), -1):
+        in_drift = (C[q] < O[q]) if buy else (C[q] > O[q])
+        if not in_drift:
+            break
+        cnt += 1
+    out["consecutive"] = cnt
+    if s["ema"][p] is not None and s["atr"][p]:
+        stretch = (s["ema"][p] - C[p]) if buy else (C[p] - s["ema"][p])
+        out["stretch_atr"] = stretch / s["atr"][p]
+    if s["atr"][p]:
+        back = cfg["drop_lookback"]
+        if buy:
+            hh = H[p - 1]
+            for q in range(p - 2, p - back - 1, -1):
+                if q < 0:
+                    break
+                hh = max(hh, H[q])
+            out["move_atr"] = (hh - C[p]) / s["atr"][p]
+        else:
+            ll = L[p - 1]
+            for q in range(p - 2, p - back - 1, -1):
+                if q < 0:
+                    break
+                ll = min(ll, L[q])
+            out["move_atr"] = (C[p] - ll) / s["atr"][p]
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Spike helpers + cycle filter (ports of IsSpike / LastSpikeShift /
 # AvgSpikeSize / CycleAllows)

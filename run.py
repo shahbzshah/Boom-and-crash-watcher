@@ -6,6 +6,7 @@ import sys
 import time
 
 import config
+import dashboard
 import health
 from health import maybe_start_health_server
 from watcher import Watcher
@@ -21,6 +22,15 @@ logging.basicConfig(
 log = logging.getLogger("crash_alert")
 
 
+def _dashboard_test_alert():
+    """The dashboard's Send-test-alert button: one Telegram message."""
+    import telegram_alerts
+
+    return telegram_alerts.send_alert(
+        "🧪 <b>Crash Watch</b>\nTest alert from the dashboard — "
+        "delivery works.")
+
+
 def main():
     problems = config.validate()
     if problems:
@@ -33,7 +43,8 @@ def main():
             # passes. Saving the env vars restarts the service and
             # the real run begins. Locally (no PORT) keep the old
             # behaviour: complain and exit.
-            health.start(int(os.environ["PORT"]))
+            health.start(int(os.environ["PORT"]),
+                         page_html=dashboard.PAGE)
             log.error("Missing config — idling on the health "
                       "endpoint until the env vars are set.")
             while True:
@@ -53,7 +64,16 @@ def main():
     log.info("Crash 1000 alert bot starting — signals only, no trading.")
     watcher = Watcher()
     # Render free tier sets PORT; everywhere else this is a no-op.
-    maybe_start_health_server(lambda: watcher._connected)
+    # The same server carries the Crash Watch dashboard.
+    maybe_start_health_server(
+        lambda: watcher._connected,
+        status_provider=watcher.status_snapshot,
+        page_html=dashboard.PAGE,
+        test_alert=_dashboard_test_alert,
+        dashboard_key=config.DASHBOARD_KEY or None,
+    )
+    if config.DASHBOARD_KEY:
+        log.info("Dashboard data endpoints are key-locked.")
     asyncio.run(watcher.run())
 
 

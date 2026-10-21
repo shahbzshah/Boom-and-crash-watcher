@@ -26,6 +26,12 @@ SYMBOL = _get("SYMBOL", "CRASH1000")
 # out of the box for market data; register your own free app at
 # api.deriv.com for your own rate limits and put its id here.
 DERIV_APP_ID = _get("DERIV_APP_ID", "1089")
+
+# Dashboard access key: when set, /status.json and /test-alert require
+# it (the page itself is just a shell with no data). Set it in the
+# host's environment on public deployments — the dashboard shows live
+# strategy output, so an open link would publish it.
+DASHBOARD_KEY = _get("DASHBOARD_KEY", "")
 SPIKE_PCT = _get("SPIKE_PCT", "0.005", float)
 
 # --- Deriv connection ---

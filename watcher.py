@@ -9,6 +9,7 @@ from collections import deque
 import config
 import crt_engine
 import deriv_feed
+import health
 import signals
 import structure
 import telegram_alerts
@@ -82,6 +83,14 @@ class Watcher:
         self.last_alert_ts = 0.0
         self._connected = False
         self._down = True
+        # Dashboard state (see status_snapshot): process start, the
+        # endpoint currently in use, feed drop/recovery times, and the
+        # fired-signal ledger with TP/SL outcomes tracked per tick.
+        self.started_at = time.time()
+        self._endpoint = None
+        self.last_connect_epoch = None
+        self.last_drop_epoch = None
+        self.signal_history = deque(maxlen=100)
         self._last_status_ts = 0.0
         self._last_notify_ts = 0.0
         self._live_req_id = None
@@ -117,6 +126,7 @@ class Watcher:
         prev = self.ticks[-1][1] if self.ticks else None
         self.ticks.append((epoch, price))
         self.ctx["current_price"] = price
+        self._track_outcomes(epoch, price)
 
         # Spike tracking: a fresh spike starts a new cycle and re-arms alerts.
         if prev is not None and signals.detect_spike(prev, price):
@@ -166,6 +176,40 @@ class Watcher:
             self.last_alert_ts = now
         else:
             log.error("Alert failed to send — staying armed to retry next signal.")
+
+    # -- signal outcome tracking (dashboard ledger) ---------------------
+
+    def _track_outcomes(self, epoch, price):
+        """Close out open dashboard signal records whose TP or SL the
+        price has reached. Points are measured to the TP/SL level
+        itself (clean numbers, and the level is what the alert
+        promised), positive when the trade made money."""
+        for rec in self.signal_history:
+            if rec["outcome"] != "open":
+                continue
+            if rec["side"] == "SELL":
+                if price <= rec["tp"]:
+                    rec["outcome"] = "tp"
+                    rec["points"] = round(rec["entry"] - rec["tp"], 2)
+                elif price >= rec["sl"]:
+                    rec["outcome"] = "sl"
+                    rec["points"] = round(rec["entry"] - rec["sl"], 2)
+                else:
+                    continue
+            else:  # BUY
+                if price >= rec["tp"]:
+                    rec["outcome"] = "tp"
+                    rec["points"] = round(rec["tp"] - rec["entry"], 2)
+                elif price <= rec["sl"]:
+                    rec["outcome"] = "sl"
+                    rec["points"] = round(rec["sl"] - rec["entry"], 2)
+                else:
+                    continue
+            rec["closed_epoch"] = epoch
+            rec["duration_sec"] = epoch - rec["epoch"]
+            log.info("Signal outcome: %s %s at %s (%s pts).",
+                     rec["side"], rec["outcome"].upper(),
+                     rec["entry"], rec["points"])
 
     # -- candle-close pipeline -------------------------------------------
 
@@ -217,6 +261,16 @@ class Watcher:
         self.ctx["crt_sell_score"] = diag.get("sell_score")
         for sig in fired:
             self.ctx["crt_last_signal"] = sig
+            risk = abs(sig["entry"] - sig["sl"])
+            self.signal_history.append({
+                "side": sig["side"], "epoch": sig["epoch"],
+                "entry": sig["entry"], "sl": sig["sl"], "tp": sig["tp"],
+                "score": sig["score"], "conditions": sig["conditions"],
+                "atr": sig["atr"],
+                "rr": (abs(sig["tp"] - sig["entry"]) / risk) if risk else None,
+                "outcome": "open", "points": None,
+                "closed_epoch": None, "duration_sec": None,
+            })
             text = telegram_alerts.format_crt_alert(
                 sig, self.symbol, f"M{config.CANDLE_MINUTES}", self.ctx)
             if telegram_alerts.send_alert(text):
@@ -224,6 +278,166 @@ class Watcher:
                             sig["side"], sig["score"], sig["entry"])
             else:
                 log.error("CRT alert failed to send (%s).", sig["side"])
+
+    # -- dashboard snapshot ------------------------------------------------
+
+    @staticmethod
+    def _endpoint_label(endpoint):
+        if not endpoint:
+            return None
+        for needle, label in (("api.derivws.com", "public gateway"),
+                              ("green.derivws.com", "green cluster"),
+                              ("blue.derivws.com", "blue cluster"),
+                              ("red.derivws.com", "red cluster"),
+                              ("binaryws", "binaryws (legacy)"),
+                              ("derivws", "derivws (legacy)")):
+            if needle in endpoint:
+                return label
+        return endpoint
+
+    def status_snapshot(self):
+        """Everything the Crash Watch dashboard renders, as one dict.
+
+        All values are the bot's real state — scores come from the
+        engine's own scorer, outcomes from the tracked ledger.
+        """
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        eat = ZoneInfo("Africa/Nairobi")
+
+        def full(epoch):
+            return (datetime.fromtimestamp(epoch, tz=eat)
+                    .strftime("%Y-%m-%d %H:%M:%S") if epoch else None)
+
+        def hm(epoch):
+            return (datetime.fromtimestamp(epoch, tz=eat)
+                    .strftime("%H:%M") if epoch else None)
+
+        def day(epoch):
+            return (datetime.fromtimestamp(epoch, tz=eat)
+                    .strftime("%Y-%m-%d") if epoch else None)
+
+        closed = self.candles.closed
+        detail = crt_engine.score_detail(closed, self.engine.cfg,
+                                         buy=False)
+        cfg = self.engine.cfg
+        price = self.ctx.get("current_price")
+
+        change_1h = None
+        if price is not None and len(closed) > 60:
+            ref = closed[-61]["c"]
+            if ref:
+                change_1h = {"abs": round(price - ref, 2),
+                             "pct": round((price - ref) / ref * 100, 3)}
+
+        cond = detail["conditions"]
+        rsi_v = detail["rsi"]
+        stretch_v = detail["stretch_atr"]
+        move_v = detail["move_atr"]
+        score_rows = [
+            {"key": "sweep", "label": "CRT sweep", "met": cond["sweep"],
+             "value": "met" if cond["sweep"] else "waiting"},
+            {"key": "consecutive", "label": "Drift candles",
+             "met": cond["consecutive"],
+             "value": f"×{detail['consecutive']}"},
+            {"key": "rsi", "label": "RSI extreme", "met": cond["rsi"],
+             "value": f"{rsi_v:.1f}" if rsi_v is not None else "—"},
+            {"key": "stretch", "label": "Stretch from EMA",
+             "met": cond["stretch"],
+             "value": (f"{stretch_v:.1f} ATR"
+                       if stretch_v is not None else "—")},
+            {"key": "move", "label": "Move size", "met": cond["move"],
+             "value": (f"{move_v:.1f} of {cfg['drop_atr']:.1f} ATR"
+                       if move_v is not None else "—")},
+        ]
+
+        def record_view(rec):
+            out = dict(rec)
+            out["time_eat"] = hm(rec["epoch"])
+            out["date_eat"] = day(rec["epoch"])
+            out["when_eat"] = full(rec["epoch"])
+            return out
+
+        history = [record_view(r) for r in reversed(self.signal_history)]
+        closed_recs = [r for r in self.signal_history
+                       if r["outcome"] in ("tp", "sl")]
+        tp_n = sum(1 for r in closed_recs if r["outcome"] == "tp")
+        rr_vals = [r["rr"] for r in closed_recs if r["rr"]]
+        stats = {
+            "signals": len(self.signal_history),
+            "tp": tp_n,
+            "sl": len(closed_recs) - tp_n,
+            "open": sum(1 for r in self.signal_history
+                        if r["outcome"] == "open"),
+            "hit_rate": (round(tp_n / len(closed_recs) * 100, 1)
+                         if closed_recs else None),
+            "total_points": round(sum(r["points"] or 0
+                                      for r in closed_recs), 1),
+            "avg_rr": (round(sum(rr_vals) / len(rr_vals), 2)
+                       if rr_vals else None),
+        }
+
+        ping = health.last_ping()
+        now = int(time.time())
+        return {
+            "now": now,
+            "now_eat": full(now),
+            "symbol": self.symbol,
+            "connected": self._connected,
+            "endpoint": self._endpoint,
+            "endpoint_label": self._endpoint_label(self._endpoint),
+            "endpoint_url": (deriv_feed.build_ws_url(
+                self._endpoint, config.DERIV_APP_ID)
+                if self._endpoint else None),
+            "price": price,
+            "change_1h": change_1h,
+            "trend": self.ctx.get("trend"),
+            "phase": self.ctx.get("phase"),
+            "phase_direction": self.ctx.get("phase_direction"),
+            "candles_closed": len(closed),
+            "buffer_keep": config.CANDLE_KEEP,
+            "rsi": rsi_v,
+            "ema": detail["ema"],
+            "atr": detail["atr"] if detail["atr"] is not None
+                   else self.ctx.get("atr"),
+            "liquidity": (self.ctx.get("range_high")
+                          or self.ctx.get("swing_high")),
+            "candles": [{"t": c["t"], "o": c["o"], "h": c["h"],
+                         "l": c["l"], "c": c["c"]}
+                        for c in closed[-40:]],
+            "score": {"value": detail["score"], "min": cfg["min_score"],
+                      "conditions": score_rows},
+            "last_signal": history[0] if history else None,
+            "history": history,
+            "stats": stats,
+            "config": {
+                "timeframe": f"M{config.CANDLE_MINUTES}",
+                "min_score": cfg["min_score"],
+                "rsi_period": cfg["rsi_period"],
+                "rsi_level": cfg["rsi_level"],
+                "stretch_ema": cfg["stretch_ema"],
+                "stretch_atr": cfg["stretch_atr"],
+                "drop_lookback": cfg["drop_lookback"],
+                "drop_atr": cfg["drop_atr"],
+                "sl_atr": cfg["sl_atr_mult"],
+                "tp_mode": cfg["tp_mode"],
+                "tp_frac": cfg["tp_spike_frac"],
+                "rr": cfg["rr"],
+                "range_bars": cfg["range_bars"],
+                "min_consecutive": cfg["min_consecutive"],
+            },
+            "delivery": {"telegram": bool(config.TELEGRAM_BOT_TOKEN
+                                          and config.TELEGRAM_CHAT_ID)},
+            "system": {
+                "started_eat": full(int(self.started_at)),
+                "uptime_sec": max(0, now - int(self.started_at)),
+                "last_connect_eat": full(self.last_connect_epoch),
+                "last_drop_eat": full(self.last_drop_epoch),
+                "host": "Render · Frankfurt",
+                "last_ping_ago_sec": (now - ping) if ping else None,
+            },
+        }
 
     # -- Deriv history seeding --------------------------------------------
 
@@ -397,6 +611,8 @@ class Watcher:
                     symbol = await self._open_session(ws, candidates)
                     live = True
                     self._connected = True
+                    self._endpoint = endpoint
+                    self.last_connect_epoch = int(time.time())
                     preferred = idx % len(endpoints)
                     failures = []
                     if self._down:
@@ -421,6 +637,7 @@ class Watcher:
             finally:
                 if self._connected:
                     self._connected = False
+                    self.last_drop_epoch = int(time.time())
             if failures:
                 if (idx + 1) % len(endpoints) == 0:
                     self._notify("⚠️", "Feed unreachable",
