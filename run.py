@@ -1,9 +1,12 @@
 """Entry point: python run.py"""
 import asyncio
 import logging
+import os
 import sys
+import time
 
 import config
+import health
 from health import maybe_start_health_server
 from watcher import Watcher
 
@@ -23,6 +26,18 @@ def main():
     if problems:
         for p in problems:
             log.error(p)
+        if os.environ.get("PORT"):
+            # Hosted web service (Render) before the secrets are set:
+            # bind the health port and idle instead of exiting, so
+            # the deploy succeeds and the platform's port check
+            # passes. Saving the env vars restarts the service and
+            # the real run begins. Locally (no PORT) keep the old
+            # behaviour: complain and exit.
+            health.start(int(os.environ["PORT"]))
+            log.error("Missing config — idling on the health "
+                      "endpoint until the env vars are set.")
+            while True:
+                time.sleep(3600)
         log.error("Fix your .env (see .env.example), then run again.")
         sys.exit(1)
     if "--test-alert" in sys.argv:
