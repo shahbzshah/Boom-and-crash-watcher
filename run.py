@@ -4,6 +4,7 @@ import logging
 import sys
 
 import config
+from health import maybe_start_health_server
 from watcher import Watcher
 
 logging.basicConfig(
@@ -35,7 +36,10 @@ def main():
         log.info("Test alert %s.", "sent" if ok else "FAILED")
         sys.exit(0 if ok else 1)
     log.info("Crash 1000 alert bot starting — signals only, no trading.")
-    asyncio.run(Watcher().run())
+    watcher = Watcher()
+    # Render free tier sets PORT; everywhere else this is a no-op.
+    maybe_start_health_server(lambda: watcher._connected)
+    asyncio.run(watcher.run())
 
 
 if __name__ == "__main__":
