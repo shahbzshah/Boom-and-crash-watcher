@@ -329,6 +329,10 @@ class Watcher:
                         config.SYMBOL, symbol)
         self.symbol = symbol
         self.crt_cfg["symbol"] = symbol
+        # The engine copied the config at build time — keep its copy in
+        # step too (symbol only matters in CRT auto mode, but stale
+        # state is stale state).
+        self.engine.cfg["symbol"] = symbol
         await self._seed_history(ws)
         self._live_req_id = await deriv_feed.subscribe_ticks(ws, symbol)
         log.info("Subscribed to %s ticks.", symbol)
