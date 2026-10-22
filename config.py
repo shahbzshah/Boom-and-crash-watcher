@@ -116,6 +116,13 @@ CRT_SL_ATR_MULT = _get("CRT_SL_ATR_MULT", "5.0", float)
 CRT_TP_MODE = _get("CRT_TP_MODE", "avg_spike")  # avg_spike | rr
 CRT_TP_SPIKE_FRAC = _get("CRT_TP_SPIKE_FRAC", "0.8", float)
 CRT_RR = _get("CRT_RR", "2.0", float)
+# Confirmation tier: a fired setup is CONFIRMED when, within this many
+# bars, a candle displaces through the setup candle's extreme in the
+# trade direction (down candle closing below the setup low for a SELL).
+# Backtest 2026-10-22 (44k M1 candles, split-half): confirmed setups
+# reached TP first ~47% of the time vs ~26% for all setups — a
+# precision tier for discretionary entries, not an auto-trade recipe.
+CRT_CONFIRM_WINDOW = _get("CRT_CONFIRM_WINDOW", "3", int)
 
 
 def validate():

@@ -92,7 +92,10 @@ def test_status_snapshot_shape():
     assert snap["last_signal"] is None
     assert snap["stats"] == {"signals": 0, "tp": 0, "sl": 0, "open": 0,
                              "hit_rate": None, "total_points": 0,
-                             "avg_rr": None}
+                             "avg_rr": None,
+                             "confirmed": {"signals": 0, "tp": 0, "sl": 0,
+                                           "open": 0, "hit_rate": None,
+                                           "total_points": 0}}
     assert snap["system"]["host"] == "Render · Frankfurt"
     assert w._endpoint_label("wss://api.derivws.com/x") == "public gateway"
 

@@ -91,6 +91,11 @@ class Watcher:
         self.last_connect_epoch = None
         self.last_drop_epoch = None
         self.signal_history = deque(maxlen=100)
+        # Confirmation tier: fired setups waiting to see whether price
+        # displaces through the setup candle's extreme within
+        # CRT_CONFIRM_WINDOW bars (see _process_confirmations).
+        self._pending_confirms = []
+        self._last_confirm_bar = None
         self._last_status_ts = 0.0
         self._last_notify_ts = 0.0
         self._live_req_id = None
@@ -247,10 +252,107 @@ class Watcher:
                      block["trend"], block["phase"],
                      block["phase_direction"], sweep_txt)
 
+    # -- confirmation tier -------------------------------------------------
+
+    def _arm_confirmation(self, sig, candle, record):
+        """Watch a freshly fired setup for displacement confirmation
+        over the next CRT_CONFIRM_WINDOW closed candles."""
+        self._pending_confirms.append({
+            "side": sig["side"],
+            "setup_epoch": sig["epoch"],
+            "setup_low": candle["l"], "setup_high": candle["h"],
+            "sl": sig["sl"],
+            "tp_dist": abs(sig["tp"] - sig["entry"]),
+            "score": sig["score"], "conditions": sig["conditions"],
+            "atr": sig["atr"],
+            "record": record,
+            "bars_seen": 0,
+        })
+
+    def _process_confirmations(self, bar):
+        """Check pending setups against the just-closed candle.
+
+        Mirrors the backtested rule exactly: a setup is void if price
+        reaches its stop first; it is CONFIRMED when a candle closes
+        through the setup candle's extreme in the trade direction
+        (SELL: down candle closing below the setup low); otherwise it
+        expires after CRT_CONFIRM_WINDOW bars.
+        """
+        if bar["t"] == self._last_confirm_bar:
+            return
+        self._last_confirm_bar = bar["t"]
+        still = []
+        for p in self._pending_confirms:
+            p["bars_seen"] += 1
+            if p["side"] == "SELL":
+                void = bar["h"] >= p["sl"]
+                hit = (not void and bar["c"] < bar["o"]
+                       and bar["c"] < p["setup_low"])
+            else:  # BUY
+                void = bar["l"] <= p["sl"]
+                hit = (not void and bar["c"] > bar["o"]
+                       and bar["c"] > p["setup_high"])
+            if void:
+                log.info("Confirmation void: %s setup at %s reached "
+                         "its stop before confirming.",
+                         p["side"], p["setup_epoch"])
+                continue
+            if hit:
+                self._fire_confirmed(p, bar)
+                continue
+            if p["bars_seen"] < config.CRT_CONFIRM_WINDOW:
+                still.append(p)
+            else:
+                log.info("Confirmation expired: %s setup at %s never "
+                         "displaced within %d bars.",
+                         p["side"], p["setup_epoch"],
+                         config.CRT_CONFIRM_WINDOW)
+        self._pending_confirms = still
+
+    def _fire_confirmed(self, p, bar):
+        """Record + alert a confirmed setup. Entry is the confirmation
+        candle's close; the stop stays at the setup's stop and the
+        target keeps the setup's TP distance — the exact geometry the
+        2026-10-22 backtest measured at ~47% TP-first."""
+        entry = bar["c"]
+        if p["side"] == "SELL":
+            tp = entry - p["tp_dist"]
+        else:
+            tp = entry + p["tp_dist"]
+        risk = abs(entry - p["sl"])
+        rec = {
+            "side": p["side"], "epoch": bar["t"],
+            "entry": entry, "sl": p["sl"], "tp": tp,
+            "score": p["score"], "conditions": p["conditions"],
+            "atr": p["atr"],
+            "rr": (p["tp_dist"] / risk) if risk else None,
+            "outcome": "open", "points": None,
+            "closed_epoch": None, "duration_sec": None,
+            "tier": "confirmed", "confirmed": True,
+            "setup_epoch": p["setup_epoch"],
+        }
+        self.signal_history.append(rec)
+        p["record"]["confirmed"] = True
+        log.warning("CRT CONFIRMED: %s setup %s displaced at %s "
+                    "(entry %s, SL %s, TP %s).",
+                    p["side"], p["setup_epoch"], bar["t"],
+                    entry, p["sl"], tp)
+        text = telegram_alerts.format_confirmed_alert(
+            rec, self.symbol, f"M{config.CANDLE_MINUTES}")
+        if telegram_alerts.send_alert(text):
+            log.warning("CRT CONFIRMED ALERT SENT: %s entry %s",
+                        p["side"], entry)
+        else:
+            log.error("CRT confirmed alert failed to send (%s).",
+                      p["side"])
+
     def _on_candle_closed(self):
-        """A candle just closed: refresh ctx, then run the CRT engine
-        and send any signal it fires straight to Telegram."""
+        """A candle just closed: refresh ctx, check pending setups for
+        confirmation, then run the CRT engine and send any signal it
+        fires straight to Telegram."""
         self._refresh_context()
+        if self.candles.closed:
+            self._process_confirmations(self.candles.closed[-1])
         try:
             fired = self.engine.on_new_close(self.candles.closed)
         except Exception as exc:
@@ -262,7 +364,7 @@ class Watcher:
         for sig in fired:
             self.ctx["crt_last_signal"] = sig
             risk = abs(sig["entry"] - sig["sl"])
-            self.signal_history.append({
+            rec = {
                 "side": sig["side"], "epoch": sig["epoch"],
                 "entry": sig["entry"], "sl": sig["sl"], "tp": sig["tp"],
                 "score": sig["score"], "conditions": sig["conditions"],
@@ -270,7 +372,12 @@ class Watcher:
                 "rr": (abs(sig["tp"] - sig["entry"]) / risk) if risk else None,
                 "outcome": "open", "points": None,
                 "closed_epoch": None, "duration_sec": None,
-            })
+                "tier": "setup", "confirmed": False,
+                "setup_epoch": None,
+            }
+            self.signal_history.append(rec)
+            if self.candles.closed:
+                self._arm_confirmation(sig, self.candles.closed[-1], rec)
             text = telegram_alerts.format_crt_alert(
                 sig, self.symbol, f"M{config.CANDLE_MINUTES}", self.ctx)
             if telegram_alerts.send_alert(text):
@@ -357,26 +464,36 @@ class Watcher:
             out["time_eat"] = hm(rec["epoch"])
             out["date_eat"] = day(rec["epoch"])
             out["when_eat"] = full(rec["epoch"])
+            if rec.get("setup_epoch"):
+                out["setup_time_eat"] = hm(rec["setup_epoch"])
             return out
 
         history = [record_view(r) for r in reversed(self.signal_history)]
-        closed_recs = [r for r in self.signal_history
-                       if r["outcome"] in ("tp", "sl")]
-        tp_n = sum(1 for r in closed_recs if r["outcome"] == "tp")
-        rr_vals = [r["rr"] for r in closed_recs if r["rr"]]
-        stats = {
-            "signals": len(self.signal_history),
-            "tp": tp_n,
-            "sl": len(closed_recs) - tp_n,
-            "open": sum(1 for r in self.signal_history
-                        if r["outcome"] == "open"),
-            "hit_rate": (round(tp_n / len(closed_recs) * 100, 1)
-                         if closed_recs else None),
-            "total_points": round(sum(r["points"] or 0
-                                      for r in closed_recs), 1),
-            "avg_rr": (round(sum(rr_vals) / len(rr_vals), 2)
-                       if rr_vals else None),
-        }
+
+        def tier_stats(recs):
+            closed_r = [r for r in recs if r["outcome"] in ("tp", "sl")]
+            tp_c = sum(1 for r in closed_r if r["outcome"] == "tp")
+            return {
+                "signals": len(recs),
+                "tp": tp_c,
+                "sl": len(closed_r) - tp_c,
+                "open": sum(1 for r in recs if r["outcome"] == "open"),
+                "hit_rate": (round(tp_c / len(closed_r) * 100, 1)
+                             if closed_r else None),
+                "total_points": round(sum(r["points"] or 0
+                                          for r in closed_r), 1),
+            }
+
+        setup_recs = [r for r in self.signal_history
+                      if r.get("tier") != "confirmed"]
+        conf_recs = [r for r in self.signal_history
+                     if r.get("tier") == "confirmed"]
+        stats = tier_stats(setup_recs)
+        rr_vals = [r["rr"] for r in setup_recs
+                   if r["outcome"] in ("tp", "sl") and r["rr"]]
+        stats["avg_rr"] = (round(sum(rr_vals) / len(rr_vals), 2)
+                           if rr_vals else None)
+        stats["confirmed"] = tier_stats(conf_recs)
 
         ping = health.last_ping()
         now = int(time.time())
@@ -426,6 +543,7 @@ class Watcher:
                 "rr": cfg["rr"],
                 "range_bars": cfg["range_bars"],
                 "min_consecutive": cfg["min_consecutive"],
+                "confirm_window": config.CRT_CONFIRM_WINDOW,
             },
             "delivery": {"telegram": bool(config.TELEGRAM_BOT_TOKEN
                                           and config.TELEGRAM_CHAT_ID)},

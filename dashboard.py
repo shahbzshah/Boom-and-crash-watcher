@@ -234,6 +234,7 @@ section.view{display:none} section.view.on{display:block}
       <div class="cell"><div class="eyebrow">AVG R : R</div><div class="num" id="st-rr">–</div></div>
     </div>
     <div class="foot" id="st-foot"></div>
+    <div class="foot" id="st-conf" style="border-top:none;padding-top:0"></div>
   </div>
   <div class="fchips" id="fchips">
     <button class="fchip on" data-f="all">ALL</button>
@@ -348,6 +349,11 @@ function outcomeHTML(r){
   return '<span class="outcome mut">OPEN — TRACKING</span>';
 }
 function tagHTML(side){ return '<span class="tag'+(side==="BUY"?" buy":"")+'">'+side+'</span>'; }
+function tierHTML(r){
+  if(r.tier==="confirmed") return '<span class="tag" style="border-color:var(--green);color:var(--green)">CONF</span>';
+  if(r.confirmed) return '<span style="font-size:10px" class="grn">✓ CONF</span>';
+  return '';
+}
 function condMini(r){
   const names={sweep:"CRT sweep",consecutive:"Drift candles",rsi:"RSI extreme",stretch:"Stretch from EMA",move:"Move size"};
   return Object.keys(names).map(k=>{
@@ -360,9 +366,11 @@ function histRow(r, expandable){
     +'<div class="hmain"><span class="tm">'+r.time_eat+'</span>'+tagHTML(r.side)
     +'<span class="en">'+fmt(r.entry)+'</span>'
     +'<span style="font-size:11px" class="mut">'+r.score+'/5</span>'
+    + tierHTML(r)
     + outcomeHTML(r) +'</div>';
   if(expandable){
     h+='<div class="hdetail"><div class="sltp">'
+      +(r.setup_time_eat? '<span>SETUP <b>'+r.setup_time_eat+'</b></span>' : '')
       +'<span>SL <b>'+fmt(r.sl)+'</b></span><span>TP <b>'+fmt(r.tp)+'</b></span>'
       +'<span>R:R <b>'+(r.rr?("1 : "+fmt(r.rr,1)):"—")+'</b></span>'
       +'<span>TIME <b>'+dur(r.duration_sec)+'</b></span></div>'
@@ -409,8 +417,8 @@ function render(){
   const ls=S.last_signal, slot=$("sig-slot");
   if(ls){
     slot.innerHTML='<div class="card sig'+(ls.side==="BUY"?" buy":"")+'">'
-      +'<div class="row"><span class="eyebrow" style="color:var(--red)">LAST SIGNAL</span>'+outcomeHTML(ls)+'</div>'
-      +'<div class="sigtitle">PRE-REVERSAL '+ls.side+' — '+ls.time_eat+' EAT</div>'
+      +'<div class="row"><span class="eyebrow" style="color:var(--red)">LAST SIGNAL'+(ls.tier==="confirmed"?" · CONFIRMED TIER":"")+'</span>'+outcomeHTML(ls)+'</div>'
+      +'<div class="sigtitle">'+(ls.tier==="confirmed"?"CONFIRMED ":"")+'PRE-REVERSAL '+ls.side+' — '+ls.time_eat+' EAT</div>'
       +'<div class="figures">Entry '+fmt(ls.entry)+' &nbsp;·&nbsp; SL '+fmt(ls.sl)+' &nbsp;·&nbsp; TP '+fmt(ls.tp)+'</div>'
       +'<div class="foot">Score '+ls.score+'/5'+(ls.duration_sec!==null&&ls.duration_sec!==undefined?(' · closed in '+dur(ls.duration_sec)):' · still open')+'</div></div>';
   } else {
@@ -429,6 +437,10 @@ function render(){
   $("st-pts").style.color= S.stats.total_points>0? "var(--green)" : (S.stats.total_points<0? "var(--red)":"");
   $("st-rr").innerHTML= S.stats.avg_rr!==null? "1 : "+fmt(S.stats.avg_rr,1)+'<small> avg</small>' : "—";
   $("st-foot").textContent="Deriv "+S.symbol+" · CRT Pre-Reversal · Sync "+(S.now_eat||"")+" EAT";
+  const cs=S.stats.confirmed;
+  $("st-conf").textContent= (cs && cs.signals)
+    ? "Confirmed tier: "+cs.signals+" · hit "+(cs.hit_rate!==null? cs.hit_rate+"%" : "—")+" · "+sgn(cs.total_points,1)+" pts — setups price itself confirmed within "+S.config.confirm_window+" bars."
+    : "Confirmed tier: none yet — a setup joins it when price displaces through the setup extreme within "+S.config.confirm_window+" bars.";
   renderHistory();
   /* config view */
   $("cf-conn").textContent= live? "CONNECTED" : (reconn? "RECONNECTING" : "DOWN");
@@ -452,7 +464,8 @@ function render(){
     + kv("Stop Loss (SL)", fmt(c.sl_atr,1)+" ATR beyond the extreme")
     + kv("Take Profit (TP)", c.tp_mode==="avg_spike"? (fmt(c.tp_frac,1)+" × avg spike (fallback "+fmt(c.rr,1)+"R)") : (fmt(c.rr,1)+"R"))
     + kv("Drift Pattern", c.min_consecutive+" consecutive candles")
-    + kv("Sweep Range", "prev "+c.range_bars+" bars");
+    + kv("Sweep Range", "prev "+c.range_bars+" bars")
+    + kv("Confirmation Tier", "displacement within "+c.confirm_window+" bars of the setup");
   $("cf-del-ready").textContent= S.delivery.telegram? "READY" : "NOT SET";
   $("cf-del").innerHTML =
     kv("Telegram Bot", S.delivery.telegram? '<span class="grn">● ACTIVE</span>' : "not configured")
