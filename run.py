@@ -23,12 +23,12 @@ log = logging.getLogger("crash_alert")
 
 
 def _dashboard_test_alert():
-    """The dashboard's Send-test-alert button: one Telegram message.
-    Returns (sent, detail) so the page can show Telegram's own error
-    description when delivery fails."""
-    import telegram_alerts
+    """The dashboard's Send-test-alert button: one message through the
+    active notification backend. Returns (sent, detail) so the page can
+    show the backend's own error description when delivery fails."""
+    import alerts
 
-    return telegram_alerts.send_alert_detailed(
+    return alerts.send_alert_detailed(
         "🧪 <b>Crash Watch</b>\nTest alert from the dashboard — "
         "delivery works.")
 
@@ -54,11 +54,11 @@ def main():
         log.error("Fix your .env (see .env.example), then run again.")
         sys.exit(1)
     if "--test-alert" in sys.argv:
-        # Sends one message and exits — use to verify Telegram setup.
-        import telegram_alerts
+        # Sends one message and exits — use to verify notification setup.
+        import alerts
 
-        ok = telegram_alerts.send_alert(
-            "✅ <b>Crash 1000 alert bot</b>\nTelegram wiring works. "
+        ok = alerts.send_alert(
+            "✅ <b>Crash 1000 alert bot</b>\nNotification wiring works. "
             "Now add your signal rule in signals.py and run without --test-alert."
         )
         log.info("Test alert %s.", "sent" if ok else "FAILED")

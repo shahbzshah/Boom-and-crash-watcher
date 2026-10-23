@@ -194,12 +194,12 @@ def test_history_conversion():
 
 
 def test_watcher_integration():
-    import telegram_alerts
+    import alerts
     import watcher as watcher_mod
 
     sent = []
-    orig_send = telegram_alerts.send_alert
-    telegram_alerts.send_alert = lambda text: sent.append(text) or True
+    orig_send = alerts.send_alert
+    alerts.send_alert = lambda text: sent.append(text) or True
     try:
         w = watcher_mod.Watcher()
         price = 1000.0
@@ -218,7 +218,7 @@ def test_watcher_integration():
         print("--- sample CRT alert ---")
         print(crt[0])
     finally:
-        telegram_alerts.send_alert = orig_send
+        alerts.send_alert = orig_send
 
 
 if __name__ == "__main__":

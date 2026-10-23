@@ -12,7 +12,7 @@ import deriv_feed
 import health
 import signals
 import structure
-import telegram_alerts
+import alerts
 import vidya
 import volumatic
 
@@ -172,10 +172,10 @@ class Watcher:
             log.info("Signal fired but inside cooldown — skipped.")
             return
 
-        text = telegram_alerts.format_alert(
+        text = alerts.format_alert(
             self.symbol, reason, price, self.ctx["ticks_since_spike"], epoch
         )
-        if telegram_alerts.send_alert(text):
+        if alerts.send_alert(text):
             log.warning("ALERT SENT: %s", reason)
             self.armed = False  # one alert per cycle
             self.last_alert_ts = now
@@ -337,9 +337,9 @@ class Watcher:
                     "(entry %s, SL %s, TP %s).",
                     p["side"], p["setup_epoch"], bar["t"],
                     entry, p["sl"], tp)
-        text = telegram_alerts.format_confirmed_alert(
+        text = alerts.format_confirmed_alert(
             rec, self.symbol, f"M{config.CANDLE_MINUTES}")
-        if telegram_alerts.send_alert(text):
+        if alerts.send_alert(text):
             log.warning("CRT CONFIRMED ALERT SENT: %s entry %s",
                         p["side"], entry)
         else:
@@ -378,9 +378,9 @@ class Watcher:
             self.signal_history.append(rec)
             if self.candles.closed:
                 self._arm_confirmation(sig, self.candles.closed[-1], rec)
-            text = telegram_alerts.format_crt_alert(
+            text = alerts.format_crt_alert(
                 sig, self.symbol, f"M{config.CANDLE_MINUTES}", self.ctx)
-            if telegram_alerts.send_alert(text):
+            if alerts.send_alert(text):
                 log.warning("CRT ALERT SENT: %s score %s entry %s",
                             sig["side"], sig["score"], sig["entry"])
             else:
@@ -618,8 +618,8 @@ class Watcher:
             return
         self._last_status_ts = now
         self._last_notify_ts = now
-        text = telegram_alerts.format_status(icon, title, detail)
-        if telegram_alerts.send_alert(text):
+        text = alerts.format_status(icon, title, detail)
+        if alerts.send_alert(text):
             log.info("Status sent: %s", title)
         else:
             log.error("Status message failed to send (%s).", title)

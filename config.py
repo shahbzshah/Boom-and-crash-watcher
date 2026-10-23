@@ -21,6 +21,16 @@ except ImportError:
 
 TELEGRAM_BOT_TOKEN = _get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = _get("TELEGRAM_CHAT_ID", "")
+
+# --- Notification backend ---
+# Set NTFY_TOPIC to route ALL alerts (setups, confirmed, feed status,
+# heartbeats, test alerts) through ntfy push instead of Telegram — see
+# alerts.py. Free, no account: the bot POSTs to this private topic on
+# the ntfy server and every phone subscribed to it gets a push. The
+# topic name is the only secret (unguessable = private); use a long
+# random one. Clear it to fall back to Telegram.
+NTFY_TOPIC = _get("NTFY_TOPIC", "")
+NTFY_SERVER = _get("NTFY_SERVER", "https://ntfy.sh")
 SYMBOL = _get("SYMBOL", "CRASH1000")
 # Deriv websocket app_id. 1089 is Deriv's public demo app — it works
 # out of the box for market data; register your own free app at
@@ -127,8 +137,14 @@ CRT_CONFIRM_WINDOW = _get("CRT_CONFIRM_WINDOW", "3", int)
 
 def validate():
     problems = []
+    # Either a working Telegram setup or an ntfy topic counts as a
+    # configured notification backend (see alerts.py for routing).
+    if NTFY_TOPIC:
+        return problems
     if not TELEGRAM_BOT_TOKEN or "xxxx" in TELEGRAM_BOT_TOKEN:
         problems.append("TELEGRAM_BOT_TOKEN is missing — copy .env.example to .env and fill it in.")
     if not TELEGRAM_CHAT_ID:
         problems.append("TELEGRAM_CHAT_ID is missing — message your bot, then read it from getUpdates (see README).")
+    if not NTFY_TOPIC:
+        problems.append("(or set NTFY_TOPIC for free ntfy push alerts instead of Telegram)")
     return problems

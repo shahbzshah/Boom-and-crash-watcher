@@ -15,8 +15,8 @@ os.environ.setdefault("TELEGRAM_CHAT_ID", "1")
 
 import pytest
 
+import alerts
 import config
-import telegram_alerts
 from watcher import Watcher
 
 T0 = 1_700_000_000
@@ -25,7 +25,7 @@ T0 = 1_700_000_000
 @pytest.fixture
 def sent(monkeypatch):
     box = []
-    monkeypatch.setattr(telegram_alerts, "send_alert",
+    monkeypatch.setattr(alerts, "send_alert",
                         lambda text: box.append(text) or True)
     return box
 

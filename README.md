@@ -40,6 +40,11 @@ want additional per-tick conditions later).
    - `TELEGRAM_CHAT_ID` — message your bot first, then open
      `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` in a browser and
      copy the `chat.id`. (Or ask @userinfobot.)
+   - **Or skip Telegram entirely:** set `NTFY_TOPIC` to a long random
+     topic (e.g. `crash1000-` + 24 hex chars), install the free ntfy
+     app on your phone, and subscribe to that topic — alerts reach
+     your phone with no BotFather token and no Render dashboard work.
+     All alert types follow the same switch (see `alerts.py`).
    - If the token was ever pasted into a chat, log, or screenshot, revoke
      it in @BotFather (`/revoke`) and put the new one in `.env` — treat
      an exposed token as compromised.
@@ -133,6 +138,11 @@ Your rule also sees the market-structure block in `ctx` (see `structure.py`):
   swings, trend (BOS/CHoCH), liquidity sweeps, AMD phase.
 - `signals.py` — optional extra per-tick rule hook (ships OFF).
 - `telegram_alerts.py` — sends the Telegram message.
+- `ntfy_alerts.py` — sends the ntfy push message (free app, no token).
+- `alerts.py` — **the single send path**: every alert (legacy, CRT,
+  confirmed, feed status, heartbeat, test alert) goes through here and
+  is routed to ntfy when `NTFY_TOPIC` is set, else Telegram. Re-exports
+  the `format_*` message builders from `telegram_alerts.py`.
 - `config.py` — reads `.env`.
 - `test_*.py` — offline test suites (62 tests).
 - `alert_bot.log` — log file (created on first run).
