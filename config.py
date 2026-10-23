@@ -145,6 +145,10 @@ def validate():
         problems.append("TELEGRAM_BOT_TOKEN is missing — copy .env.example to .env and fill it in.")
     if not TELEGRAM_CHAT_ID:
         problems.append("TELEGRAM_CHAT_ID is missing — message your bot, then read it from getUpdates (see README).")
-    if not NTFY_TOPIC:
+    if problems:
+        # A hint, not a failure: only worth mentioning when Telegram
+        # itself is not configured. (Regression fix: appending this
+        # unconditionally made validate() fail Telegram-only setups,
+        # which sent the hosted bot into its idle mode.)
         problems.append("(or set NTFY_TOPIC for free ntfy push alerts instead of Telegram)")
     return problems

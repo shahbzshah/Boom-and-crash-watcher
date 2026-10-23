@@ -151,3 +151,13 @@ def test_validate_suggests_ntfy_when_nothing_set(monkeypatch):
     monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "")
     problems = config.validate()
     assert any("NTFY_TOPIC" in p for p in problems)
+
+
+def test_validate_passes_with_telegram_only(monkeypatch):
+    # Telegram configured, no ntfy: valid setup, no problems — the
+    # hosted bot must start, not idle (regression: the ntfy hint was
+    # appended unconditionally and counted as a failure).
+    monkeypatch.setattr(config, "NTFY_TOPIC", "")
+    monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "123:real-token")
+    monkeypatch.setattr(config, "TELEGRAM_CHAT_ID", "42")
+    assert config.validate() == []
