@@ -506,9 +506,16 @@ function drawChart(){
   ctx.clearRect(0,0,W,H);
   const cs=S.candles;
   if(!cs.length){ $("c-range").textContent=""; return; }
+  /* trade levels of the latest signal — always drawn while it is the
+     latest: ENTRY, TP1 (halfway to target), TP2 (the bot's TP), SL */
+  const ls=S.last_signal;
+  let lv=null;
+  if(ls) lv={entry:ls.entry, tp1:ls.entry+(ls.tp-ls.entry)/2,
+             tp2:ls.tp, sl:ls.sl};
   let lo=Infinity, hi=-Infinity;
   cs.forEach(c=>{ lo=Math.min(lo,c.l); hi=Math.max(hi,c.h); });
   if(S.liquidity && S.liquidity>lo && S.liquidity<hi*1.02){ hi=Math.max(hi,S.liquidity); }
+  if(lv) [lv.entry,lv.tp1,lv.tp2,lv.sl].forEach(v=>{ lo=Math.min(lo,v); hi=Math.max(hi,v); });
   const pad=(hi-lo)*0.08||1; hi+=pad; lo-=pad;
   const y=v=> H-P-((v-lo)/(hi-lo))*(H-2*P);
   ctx.strokeStyle="#262C28"; ctx.lineWidth=1;
@@ -530,6 +537,57 @@ function drawChart(){
     tag.textContent="liquidity "+fmt(S.liquidity);
     $("c-range").textContent="";
   } else tag.style.display="none";
+  if(!lv) return;
+  const hline=(v,color,dash,label)=>{
+    const yy=y(v); if(yy<P-4||yy>H-P+4) return;
+    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash(dash||[]);
+    ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(W,yy); ctx.stroke();
+    ctx.setLineDash([]); ctx.lineWidth=1;
+    ctx.font="700 19px 'Space Mono',monospace";
+    const tw=ctx.measureText(label).width;
+    ctx.fillStyle="#101312"; ctx.fillRect(W-tw-14, yy-12, tw+10, 24);
+    ctx.fillStyle=color; ctx.fillText(label, W-tw-9, yy+7);
+  };
+  hline(lv.sl, "#E5484D", [10,6], "SL "+fmt(lv.sl));
+  hline(lv.tp2, "#46A758", [], "TP2 "+fmt(lv.tp2));
+  hline(lv.tp1, "#46A758", [10,6], "TP1 "+fmt(lv.tp1));
+  hline(lv.entry, "#E8E6DF", [], "ENTRY "+fmt(lv.entry));
+  const xOf=ep=>{ const i=cs.findIndex(c=>c.t===ep);
+    return i<0? null : P+i*step+step/2; };
+  /* entry marker: faint vertical + dot on the signal bar */
+  const ex=xOf(ls.epoch);
+  if(ex!==null){
+    ctx.strokeStyle="rgba(232,230,223,.35)"; ctx.setLineDash([3,6]);
+    ctx.beginPath(); ctx.moveTo(ex,P); ctx.lineTo(ex,H-P); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle="#E8E6DF";
+    ctx.beginPath(); ctx.arc(ex, y(ls.entry), 5, 0, 7); ctx.fill();
+  }
+  /* entry dots for any other signals inside the window */
+  (S.history||[]).forEach(r=>{
+    if(r.epoch===ls.epoch) return;
+    const x=xOf(r.epoch); if(x===null) return;
+    ctx.fillStyle= r.outcome==="tp"? "#46A758" : r.outcome==="sl"? "#E5484D" : "#9AA39C";
+    ctx.beginPath(); ctx.arc(x, y(r.entry), 4, 0, 7); ctx.fill();
+  });
+  /* exit marker where the latest signal closed (TP or SL) */
+  if((ls.outcome==="tp"||ls.outcome==="sl") && ls.closed_epoch){
+    const fx=(ls.closed_epoch-cs[0].t)/60;
+    if(fx>=0 && fx<cs.length){
+      const x=P+fx*step+step/2, yy=y(ls.outcome==="tp"? ls.tp : ls.sl);
+      const col= ls.outcome==="tp"? "#46A758":"#E5484D";
+      ctx.strokeStyle=col; ctx.lineWidth=3;
+      const r=8;
+      ctx.beginPath();
+      ctx.moveTo(x-r,yy-r); ctx.lineTo(x+r,yy+r);
+      ctx.moveTo(x+r,yy-r); ctx.lineTo(x-r,yy+r);
+      ctx.stroke(); ctx.lineWidth=1;
+      ctx.font="700 19px 'Space Mono',monospace";
+      const label="EXIT "+sgn(ls.points,1);
+      ctx.fillStyle=col;
+      ctx.fillText(label, Math.min(x+12, W-ctx.measureText(label).width-6), yy-12);
+    }
+  }
 }
 
 /* ---------- test alert ---------- */
