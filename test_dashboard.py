@@ -95,7 +95,10 @@ def test_status_snapshot_shape():
                              "avg_rr": None,
                              "confirmed": {"signals": 0, "tp": 0, "sl": 0,
                                            "open": 0, "hit_rate": None,
-                                           "total_points": 0}}
+                                           "total_points": 0},
+                             "ema_retest": {"signals": 0, "tp": 0, "sl": 0,
+                                            "open": 0, "hit_rate": None,
+                                            "total_points": 0}}
     assert snap["system"]["host"] == "Render · Frankfurt"
     assert w._endpoint_label("wss://api.derivws.com/x") == "public gateway"
 

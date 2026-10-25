@@ -9,6 +9,7 @@ from collections import deque
 import config
 import crt_engine
 import deriv_feed
+import ema_shadow
 import health
 import signals
 import structure
@@ -126,6 +127,10 @@ class Watcher:
             "rr": config.CRT_RR,
         }
         self.engine = crt_engine.CRTEngine(self.crt_cfg)
+        # EMA-retest shadow tier (Dancan proposal, backtested
+        # 2026-10-24). Runs alongside CRT, never interferes with it:
+        # its own state machine, its own ledger tier, its own alerts.
+        self.ema_shadow = ema_shadow.EMAShadowEngine()
 
     def _on_tick(self, epoch, price):
         prev = self.ticks[-1][1] if self.ticks else None
@@ -385,6 +390,35 @@ class Watcher:
                             sig["side"], sig["score"], sig["entry"])
             else:
                 log.error("CRT alert failed to send (%s).", sig["side"])
+        # EMA-retest shadow tier: evaluated after CRT, in its own
+        # try/except so a shadow failure can never break CRT.
+        try:
+            entry = (self.ema_shadow.feed(self.candles.closed[-1])
+                     if self.candles.closed else None)
+        except Exception as exc:
+            log.error("EMA shadow raised: %s", exc)
+            entry = None
+        if entry is not None:
+            rec = {
+                "side": "SELL", "epoch": entry["epoch"],
+                "entry": entry["entry"], "sl": entry["sl"],
+                "tp": entry["tp"],
+                "score": None, "conditions": None,
+                "atr": entry["atr"],
+                "rr": ema_shadow.TP_RR,
+                "outcome": "open", "points": None,
+                "closed_epoch": None, "duration_sec": None,
+                "tier": "ema_retest", "confirmed": False,
+                "setup_epoch": None,
+            }
+            self.signal_history.append(rec)
+            text = alerts.format_ema_retest_alert(
+                rec, self.symbol, f"M{config.CANDLE_MINUTES}")
+            if alerts.send_alert(text):
+                log.warning("EMA-RETEST SHADOW ALERT SENT: SELL entry %s",
+                            entry["entry"])
+            else:
+                log.error("EMA-retest shadow alert failed to send.")
 
     # -- dashboard snapshot ------------------------------------------------
 
@@ -484,16 +518,22 @@ class Watcher:
                                           for r in closed_r), 1),
             }
 
+        # Tier split is exact: setup records are tier=="setup" only.
+        # (The old tier!="confirmed" test would have let ema_retest
+        # records pollute the setup stats.)
         setup_recs = [r for r in self.signal_history
-                      if r.get("tier") != "confirmed"]
+                      if r.get("tier") == "setup"]
         conf_recs = [r for r in self.signal_history
                      if r.get("tier") == "confirmed"]
+        ema_recs = [r for r in self.signal_history
+                    if r.get("tier") == "ema_retest"]
         stats = tier_stats(setup_recs)
         rr_vals = [r["rr"] for r in setup_recs
                    if r["outcome"] in ("tp", "sl") and r["rr"]]
         stats["avg_rr"] = (round(sum(rr_vals) / len(rr_vals), 2)
                            if rr_vals else None)
         stats["confirmed"] = tier_stats(conf_recs)
+        stats["ema_retest"] = tier_stats(ema_recs)
 
         ping = health.last_ping()
         now = int(time.time())
@@ -544,6 +584,15 @@ class Watcher:
                 "range_bars": cfg["range_bars"],
                 "min_consecutive": cfg["min_consecutive"],
                 "confirm_window": config.CRT_CONFIRM_WINDOW,
+                "ema_retest": {
+                    "label": "EMA-RETEST · SHADOW",
+                    "trend": "close < EMA91 < EMA365",
+                    "trigger": "EMA6 retest",
+                    "sl": "EMA91 at entry",
+                    "tp": "1.5R",
+                    "spike_exclusion": True,
+                    "judgment": ema_shadow.SHADOW_JUDGMENT,
+                },
             },
             "delivery": {"telegram": bool(config.TELEGRAM_BOT_TOKEN
                                           and config.TELEGRAM_CHAT_ID)},
@@ -592,10 +641,17 @@ class Watcher:
             self.candles.seed(candles)
             self.engine.reset()
             self.engine.backfill(self.candles.closed)
+            # Shadow tier: reset + refill silently. Seeded bars never
+            # alert or record; only the carried state (pullback /
+            # open-trade) matters, so live scanning resumes correctly.
+            self.ema_shadow.reset()
+            suppressed = self.ema_shadow.feed_many(self.candles.closed)
             self._refresh_context()
             log.info("History seeded: %d closed candles, %d past CRT "
-                     "signal(s) in the current window.",
-                     len(self.candles.closed), len(self.engine.signals))
+                     "signal(s) in the current window, %d past EMA "
+                     "shadow entries suppressed.",
+                     len(self.candles.closed), len(self.engine.signals),
+                     suppressed)
         except Exception as exc:
             log.warning("History seed failed (%s) — continuing live-only.",
                         exc)

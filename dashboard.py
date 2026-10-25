@@ -235,6 +235,7 @@ section.view{display:none} section.view.on{display:block}
     </div>
     <div class="foot" id="st-foot"></div>
     <div class="foot" id="st-conf" style="border-top:none;padding-top:0"></div>
+    <div class="foot" id="st-ema" style="border-top:none;padding-top:0"></div>
   </div>
   <div class="fchips" id="fchips">
     <button class="fchip on" data-f="all">ALL</button>
@@ -351,6 +352,7 @@ function outcomeHTML(r){
 function tagHTML(side){ return '<span class="tag'+(side==="BUY"?" buy":"")+'">'+side+'</span>'; }
 function tierHTML(r){
   if(r.tier==="confirmed") return '<span class="tag" style="border-color:var(--green);color:var(--green)">CONF</span>';
+  if(r.tier==="ema_retest") return '<span class="tag" style="border-color:var(--rust);color:var(--rust)">EMA</span>';
   if(r.confirmed) return '<span style="font-size:10px" class="grn">✓ CONF</span>';
   return '';
 }
@@ -365,7 +367,7 @@ function histRow(r, expandable){
   let h='<div class="hrow'+(expandable?"":"")+'" data-oc="'+r.outcome+'">'
     +'<div class="hmain"><span class="tm">'+r.time_eat+'</span>'+tagHTML(r.side)
     +'<span class="en">'+fmt(r.entry)+'</span>'
-    +'<span style="font-size:11px" class="mut">'+r.score+'/5</span>'
+    +(r.score===null||r.score===undefined?'':'<span style="font-size:11px" class="mut">'+r.score+'/5</span>')
     + tierHTML(r)
     + outcomeHTML(r) +'</div>';
   if(expandable){
@@ -374,7 +376,7 @@ function histRow(r, expandable){
       +'<span>SL <b>'+fmt(r.sl)+'</b></span><span>TP <b>'+fmt(r.tp)+'</b></span>'
       +'<span>R:R <b>'+(r.rr?("1 : "+fmt(r.rr,1)):"—")+'</b></span>'
       +'<span>TIME <b>'+dur(r.duration_sec)+'</b></span></div>'
-      +'<div class="condmini">'+condMini(r)+'</div></div>';
+      +(r.conditions?'<div class="condmini">'+condMini(r)+'</div>':'')+'</div>';
   }
   return h+'</div>';
 }
@@ -417,10 +419,10 @@ function render(){
   const ls=S.last_signal, slot=$("sig-slot");
   if(ls){
     slot.innerHTML='<div class="card sig'+(ls.side==="BUY"?" buy":"")+'">'
-      +'<div class="row"><span class="eyebrow" style="color:var(--red)">LAST SIGNAL'+(ls.tier==="confirmed"?" · CONFIRMED TIER":"")+'</span>'+outcomeHTML(ls)+'</div>'
-      +'<div class="sigtitle">'+(ls.tier==="confirmed"?"CONFIRMED ":"")+'PRE-REVERSAL '+ls.side+' — '+ls.time_eat+' EAT</div>'
+      +'<div class="row"><span class="eyebrow" style="color:var(--red)">LAST SIGNAL'+(ls.tier==="confirmed"?" · CONFIRMED TIER":(ls.tier==="ema_retest"?" · EMA-RETEST SHADOW":""))+'</span>'+outcomeHTML(ls)+'</div>'
+      +'<div class="sigtitle">'+(ls.tier==="confirmed"?"CONFIRMED PRE-REVERSAL ":(ls.tier==="ema_retest"?"EMA-RETEST SHADOW ":"PRE-REVERSAL "))+ls.side+' — '+ls.time_eat+' EAT</div>'
       +'<div class="figures">Entry '+fmt(ls.entry)+' &nbsp;·&nbsp; SL '+fmt(ls.sl)+' &nbsp;·&nbsp; TP '+fmt(ls.tp)+'</div>'
-      +'<div class="foot">Score '+ls.score+'/5'+(ls.duration_sec!==null&&ls.duration_sec!==undefined?(' · closed in '+dur(ls.duration_sec)):' · still open')+'</div></div>';
+      +'<div class="foot">'+(ls.tier==="ema_retest"?"Shadow tier — backtest +2.80 expectancy on 24 trades (not proven)":("Score "+ls.score+"/5"))+(ls.duration_sec!==null&&ls.duration_sec!==undefined?(' · closed in '+dur(ls.duration_sec)):' · still open')+'</div></div>';
   } else {
     slot.innerHTML='<div class="card"><span class="eyebrow">LAST SIGNAL</span>'
       +'<div class="empty">No signal fired yet since the bot started. When the score reaches '+S.score.min+' of 5, the signal appears here and on Telegram at the same moment.</div></div>';
@@ -441,6 +443,11 @@ function render(){
   $("st-conf").textContent= (cs && cs.signals)
     ? "Confirmed tier: "+cs.signals+" · hit "+(cs.hit_rate!==null? cs.hit_rate+"%" : "—")+" · "+sgn(cs.total_points,1)+" pts — setups price itself confirmed within "+S.config.confirm_window+" bars."
     : "Confirmed tier: none yet — a setup joins it when price displaces through the setup extreme within "+S.config.confirm_window+" bars.";
+  const em=S.stats.ema_retest;
+  const emRule=(S.config.ema_retest && S.config.ema_retest.judgment) || "SHADOW — judged after 30 live days; drop if live expectancy <= 0 on >= 20 trades";
+  $("st-ema").textContent= (em && em.signals)
+    ? "EMA-RETEST tier (shadow): "+em.signals+" · hit "+(em.hit_rate!==null? em.hit_rate+"%" : "—")+" · "+sgn(em.total_points,1)+" pts — EMA6 retest, stop at EMA91, target 1.5R. "+emRule+"."
+    : "EMA-RETEST tier (shadow): none yet — fires on EMA6 retests in a downtrend (close < EMA91 < EMA365), stop at EMA91, target 1.5R. "+emRule+".";
   renderHistory();
   /* config view */
   $("cf-conn").textContent= live? "CONNECTED" : (reconn? "RECONNECTING" : "DOWN");
@@ -466,6 +473,13 @@ function render(){
     + kv("Drift Pattern", c.min_consecutive+" consecutive candles")
     + kv("Sweep Range", "prev "+c.range_bars+" bars")
     + kv("Confirmation Tier", "displacement within "+c.confirm_window+" bars of the setup");
+  const emc=c.ema_retest;
+  if(emc){
+    $("cf-strat").innerHTML +=
+      kv("EMA-Retest Tier (Shadow)", emc.trigger+" · "+emc.trend)
+      + kv("Shadow Stop / Target", emc.sl+" · "+emc.tp)
+      + kv("Shadow Judgment", emc.judgment);
+  }
   $("cf-del-ready").textContent= S.delivery.telegram? "READY" : "NOT SET";
   $("cf-del").innerHTML =
     kv("Telegram Bot", S.delivery.telegram? '<span class="grn">● ACTIVE</span>' : "not configured")

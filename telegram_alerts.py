@@ -126,6 +126,30 @@ def format_crt_alert(signal, symbol, tf_label, ctx=None):
     return "\n".join(lines)
 
 
+def format_ema_retest_alert(record, symbol, tf_label):
+    """EMA-retest shadow-tier alert. Mirrors format_crt_alert's layout,
+    but the honesty note is the point: this tier is backtested, not
+    proven, and must not be traded off during the shadow period."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    eat = datetime.fromtimestamp(record["epoch"],
+                                 tz=ZoneInfo("Africa/Nairobi"))
+    eat_time = eat.strftime("%Y-%m-%d %H:%M:%S")
+    lines = [
+        f"🔬 <b>[EMA-RETEST · SHADOW] {record['side']}</b> — "
+        f"{symbol} ({tf_label})",
+        f"Price: {record['entry']:.2f} | SL: {record['sl']:.2f} | "
+        f"TP: {record['tp']:.2f}",
+        "EMA6 retest in a downtrend (close < EMA91 < EMA365) · "
+        "stop at EMA91 · target 1.5R.",
+        "30-day backtest +2.80 expectancy on 24 trades — shadow tier, "
+        "not proven, do not trade off it.",
+        f"Time: {eat_time} EAT",
+    ]
+    return "\n".join(lines)
+
+
 def format_confirmed_alert(record, symbol, tf_label):
     """Confirmation-tier alert: a CRT setup that price itself confirmed
     by displacing through the setup candle's extreme within the

@@ -22,6 +22,7 @@ format_alert = telegram_alerts.format_alert
 format_status = telegram_alerts.format_status
 format_crt_alert = telegram_alerts.format_crt_alert
 format_confirmed_alert = telegram_alerts.format_confirmed_alert
+format_ema_retest_alert = telegram_alerts.format_ema_retest_alert
 
 
 def backend_name():
