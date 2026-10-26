@@ -51,7 +51,8 @@ def last_ping():
 
 
 def _make_handler(feed_connected, status_provider=None, page_html=None,
-                  test_alert=None, dashboard_key=None, explain=None):
+                  test_alert=None, dashboard_key=None, explain=None,
+                  candles_provider=None):
     class HealthHandler(BaseHTTPRequestHandler):
         server_version = "CrashAlertHealth/1.0"
 
@@ -116,6 +117,26 @@ def _make_handler(feed_connected, status_provider=None, page_html=None,
                     self._send(500, b'{"error": "status unavailable"}')
                     return
                 self._send(200, json.dumps(payload))
+                return
+            if path == "/candles":
+                # Full closed-candle buffer for the dashboard's
+                # draggable chart. Same key gate as /status.json; the
+                # sidecar never calls this, so it stays out of the
+                # 5-minute fetch path.
+                if candles_provider is None:
+                    self._send(404, b'{"error": "not found"}')
+                    return
+                if not self._key_ok(query):
+                    self._send(401, b'{"error": "key required"}')
+                    return
+                try:
+                    candles = candles_provider()
+                except Exception as exc:  # never take the bot down
+                    log.error("candles provider failed: %s", exc)
+                    self._send(500, b'{"error": "candles unavailable"}')
+                    return
+                self._send(200, json.dumps(
+                    {"candles": list(candles or [])}))
                 return
             self._send(404, b'{"error": "not found"}')
 
@@ -189,14 +210,14 @@ def _make_handler(feed_connected, status_provider=None, page_html=None,
 
 def start(port: int, feed_connected: Optional[Callable[[], bool]] = None,
           status_provider=None, page_html=None, test_alert=None,
-          dashboard_key=None, explain=None):
+          dashboard_key=None, explain=None, candles_provider=None):
     """Start the HTTP server on a background daemon thread.
 
     Returns the server instance so tests can read the bound port.
     """
     handler = _make_handler(feed_connected or (lambda: False),
                             status_provider, page_html, test_alert,
-                            dashboard_key, explain)
+                            dashboard_key, explain, candles_provider)
     server = ThreadingHTTPServer(("0.0.0.0", port), handler)
     server.daemon_threads = True
     thread = threading.Thread(
@@ -210,7 +231,7 @@ def start(port: int, feed_connected: Optional[Callable[[], bool]] = None,
 def maybe_start_health_server(
     feed_connected: Optional[Callable[[], bool]] = None,
     status_provider=None, page_html=None, test_alert=None,
-    dashboard_key=None, explain=None,
+    dashboard_key=None, explain=None, candles_provider=None,
 ):
     """Start the HTTP server only when PORT is set (Render free tier).
 
@@ -226,4 +247,4 @@ def maybe_start_health_server(
                     port_raw)
         return None
     return start(port, feed_connected, status_provider, page_html,
-                 test_alert, dashboard_key, explain)
+                 test_alert, dashboard_key, explain, candles_provider)

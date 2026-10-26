@@ -152,3 +152,27 @@ def test_dashboard_routes_and_key_gate():
                 "status": "ok", "feed_connected": True}
     finally:
         server.shutdown()
+
+
+def test_candles_route_and_key_gate():
+    # /candles serves the bot's closed-candle buffer for the
+    # draggable chart, under the same key gate as /status.json.
+    server = health.start(0, lambda: True,
+                          status_provider=lambda: {"x": 1},
+                          candles_provider=lambda: [
+                              {"t": 1, "o": 1, "h": 2, "l": 0, "c": 1.5}],
+                          page_html="<html>dash</html>",
+                          dashboard_key="sekret")
+    try:
+        try:
+            _req(server, "/candles")
+            raise AssertionError("expected 401")
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+        with _req(server, "/candles", key="sekret") as resp:
+            body = json.loads(resp.read())
+            assert body["candles"][0]["t"] == 1
+        with _req(server, "/candles?k=sekret") as resp:
+            assert resp.status == 200
+    finally:
+        server.shutdown()

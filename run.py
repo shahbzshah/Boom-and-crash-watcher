@@ -74,6 +74,7 @@ def main():
         test_alert=_dashboard_test_alert,
         dashboard_key=config.DASHBOARD_KEY or None,
         explain=watcher.attach_explanation,
+        candles_provider=lambda: watcher.candles.closed,
     )
     if config.DASHBOARD_KEY:
         log.info("Dashboard data endpoints are key-locked.")

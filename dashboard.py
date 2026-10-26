@@ -2,7 +2,8 @@
 
 The markup and styling implement Megah's Stitch design (dark ink
 trading-desk instrument: Newsreader serif + Space Mono, hairline
-panels, state colours only). All data comes from /status.json, which
+panels, state colours only). All data comes from /status.json
+(+ /candles, fetched once per page load, for chart history), which
 the watcher builds from its real state — nothing on this page is
 decorative filler. The page itself holds no data, so it is safe to
 serve openly; the data endpoints are key-gated (see health.py).
@@ -66,7 +67,8 @@ header{position:sticky;top:0;z-index:20;background:var(--ink);
   border-top:1px solid var(--hair);padding-top:9px}
 /* chart */
 .chartbox{position:relative;margin-top:8px}
-canvas{width:100%;height:170px;display:block}
+canvas{width:100%;height:170px;display:block;touch-action:none;cursor:grab}
+canvas:active{cursor:grabbing}
 .liqtag{position:absolute;right:0;background:var(--ink);
   border:1px solid var(--hair);color:var(--red);font-size:9px;
   padding:1px 5px;letter-spacing:.05em;transform:translateY(-50%)}
@@ -172,7 +174,7 @@ section.view{display:none} section.view.on{display:block}
 <!-- ================= MONITOR ================= -->
 <section class="view on" id="v-monitor">
   <div class="card">
-    <div class="row"><span class="eyebrow" id="h-sym">CRASH 1000 · DERIV · M1</span><span class="eyebrow">SYNTHETIC</span></div>
+    <div class="row"><span class="eyebrow" id="h-sym">CRASH 1000 · DERIV</span><span class="eyebrow">SYNTHETIC</span></div>
     <div class="row" style="align-items:flex-end">
       <div class="price" id="h-price">—</div>
       <div class="chg" id="h-chg"></div>
@@ -185,7 +187,7 @@ section.view{display:none} section.view.on{display:block}
   </div>
 
   <div class="card">
-    <div class="row"><span class="eyebrow">LAST 40 M1 PERIODS</span><span class="eyebrow" id="c-range"></span></div>
+    <div class="row"><span class="eyebrow" id="c-title">LAST 40 PERIODS</span><span class="eyebrow" id="c-range"></span></div>
     <div class="chartbox">
       <canvas id="chart" width="800" height="340"></canvas>
       <div class="liqtag" id="liqtag" style="display:none"></div>
@@ -301,6 +303,7 @@ let KEY = new URLSearchParams(location.search).get("k")
   || localStorage.getItem("cw_key") || "";
 if (KEY) localStorage.setItem("cw_key", KEY);
 let S = null, HFILTER = "all";
+let CMAP = new Map(), HIST_LOADED = false, VIEW_EPOCH = null;
 
 const eatFmt = new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Nairobi",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
 const eatDay = new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Nairobi",day:"2-digit",month:"short",year:"numeric"});
@@ -325,6 +328,13 @@ async function load(){
     if(r.status===401){ $("lock").style.display="flex"; return; }
     if(!r.ok) throw new Error("bad");
     S = await r.json();
+    if(!HIST_LOADED){
+      try{
+        const hr=await fetch("/candles",{headers:{"X-Dash-Key":KEY},cache:"no-store"});
+        if(hr.ok){ const hj=await hr.json();
+          (hj.candles||[]).forEach(c=>CMAP.set(c.t,c)); HIST_LOADED=true; }
+      }catch(e){ /* retry on the next load */ }
+    }
     $("lock").style.display="none";
     render();
   }catch(e){
@@ -393,6 +403,7 @@ function render(){
   $("fclock").textContent="· "+eatFmt.format(new Date())+" EAT";
   /* hero */
   $("h-sym").textContent=(S.symbol==="CRASH1000"?"CRASH 1000":S.symbol)+" · DERIV · "+S.config.timeframe;
+  $("c-title").textContent="LAST 40 "+S.config.timeframe+" PERIODS";
   $("h-price").textContent=fmt(S.price);
   if(S.change_1h){ const c=S.change_1h, up=c.abs>=0;
     $("h-chg").innerHTML='<div class="'+(up?"grn":"red")+'">'+(up?"▲ ":"▼ ")+sgn(c.abs)+' 1H</div>'
@@ -457,7 +468,7 @@ function render(){
   const kv=(k,v)=> '<div class="kv"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>';
   $("cf-conn-rows").innerHTML =
     kv("Instrument", S.symbol+" (Synthetic)")
-    + kv("Candle Timeframe", S.config.timeframe+" (60s)")
+    + kv("Candle Timeframe", S.config.timeframe+" ("+tfSec()+"s)")
     + kv("Buffer Fill Level", fmt(S.candles_closed,0)+" / "+fmt(S.buffer_keep,0))
     + kv("Last Feed Connected", S.system.last_connect_eat||"—")
     + kv("Last Feed Drop", S.system.last_drop_eat||"—")
@@ -516,12 +527,27 @@ document.querySelectorAll("#fchips .fchip").forEach(b=>{
 $("m-hist").addEventListener("click", goHistory);
 
 /* ---------- chart ---------- */
+function tfSec(){ const m=/^M(\d+)$/.exec((S.config&&S.config.timeframe)||"");
+  return m? parseInt(m[1])*60 : 60; }
+function allCandles(){
+  (S.candles||[]).forEach(c=>CMAP.set(c.t,c));
+  if(CMAP.size>2000){ const ks=[...CMAP.keys()].sort((a,b)=>a-b);
+    ks.slice(0, CMAP.size-2000).forEach(k=>CMAP.delete(k)); }
+  return [...CMAP.values()].sort((a,b)=>a.t-b.t);
+}
 function drawChart(){
   const cv=$("chart"); if(!cv||!S) return;
   const ctx=cv.getContext("2d"), W=cv.width, H=cv.height, P=8;
   ctx.clearRect(0,0,W,H);
-  const cs=S.candles;
+  const all=allCandles();
+  let endIdx=all.length;
+  if(VIEW_EPOCH!==null){ const fi=all.findIndex(c=>c.t===VIEW_EPOCH);
+    endIdx = fi<0? all.length : fi+1; }
+  const cs=all.slice(Math.max(0,endIdx-40), endIdx);
   if(!cs.length){ $("c-range").textContent=""; return; }
+  const hhmm=t=>eatFmt.format(new Date(t*1000)).slice(0,5);
+  $("c-range").textContent=hhmm(cs[0].t)+"–"+hhmm(cs[cs.length-1].t)
+    +(VIEW_EPOCH!==null?" · DRAG LEFT FOR LIVE":"");
   /* trade levels of the latest signal — always drawn while it is the
      latest: ENTRY, TP1 (halfway to target), TP2 (the bot's TP), SL */
   const ls=S.last_signal;
@@ -551,7 +577,6 @@ function drawChart(){
     ctx.setLineDash([]);
     tag.style.display="block"; tag.style.top=(yy/H*100)+"%";
     tag.textContent="liquidity "+fmt(S.liquidity);
-    $("c-range").textContent="";
   } else tag.style.display="none";
   if(!lv) return;
   const hline=(v,color,dash,label)=>{
@@ -588,7 +613,7 @@ function drawChart(){
   });
   /* exit marker where the latest signal closed (TP or SL) */
   if((ls.outcome==="tp"||ls.outcome==="sl") && ls.closed_epoch){
-    const fx=(ls.closed_epoch-cs[0].t)/60;
+    const fx=(ls.closed_epoch-cs[0].t)/tfSec();
     if(fx>=0 && fx<cs.length){
       const x=P+fx*step+step/2, yy=y(ls.outcome==="tp"? ls.tp : ls.sl);
       const col= ls.outcome==="tp"? "#46A758":"#E5484D";
@@ -605,6 +630,36 @@ function drawChart(){
     }
   }
 }
+
+/* ---------- chart pan: drag to look back, drag left returns to live ---------- */
+(function(){
+  const cv=$("chart"); if(!cv) return;
+  let dragging=false, startX=0, startIdx=0;
+  const toCanvasX=e=>{ const r=cv.getBoundingClientRect();
+    return (e.clientX-r.left)*(cv.width/r.width); };
+  const curIdx=()=>{ const all=allCandles();
+    if(VIEW_EPOCH===null) return all.length-1;
+    const fi=all.findIndex(c=>c.t===VIEW_EPOCH);
+    return fi<0? all.length-1 : fi; };
+  cv.addEventListener("pointerdown", e=>{
+    const all=allCandles(); if(all.length<2) return;
+    dragging=true; startX=toCanvasX(e); startIdx=curIdx();
+    try{ cv.setPointerCapture(e.pointerId); }catch(err){}
+  });
+  cv.addEventListener("pointermove", e=>{
+    if(!dragging) return;
+    const all=allCandles(); if(all.length<2) return;
+    const dx=toCanvasX(e)-startX;
+    const lo=Math.min(39, all.length-1), hi=all.length-1;
+    const idx=Math.max(lo, Math.min(hi, startIdx-Math.round(dx/(cv.width/40))));
+    VIEW_EPOCH = idx>=hi? null : all[idx].t;
+    drawChart();
+  });
+  const end=()=>{ dragging=false; };
+  cv.addEventListener("pointerup", end);
+  cv.addEventListener("pointercancel", end);
+  cv.addEventListener("dblclick", ()=>{ VIEW_EPOCH=null; drawChart(); });
+})();
 
 /* ---------- test alert ---------- */
 $("btn-test").onclick=async()=>{
