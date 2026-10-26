@@ -457,10 +457,12 @@ function render(){
     ? "Confirmed tier: "+cs.signals+" · hit "+(cs.hit_rate!==null? cs.hit_rate+"%" : "—")+" · "+sgn(cs.total_points,1)+" pts — setups price itself confirmed within "+S.config.confirm_window+" bars."
     : "Confirmed tier: none yet — a setup joins it when price displaces through the setup extreme within "+S.config.confirm_window+" bars.";
   const em=S.stats.ema_retest;
+  const emPaused = S.config.ema_retest && S.config.ema_retest.enabled===false;
+  const emPausedTxt = emPaused ? " · PAUSED — no new shadow signals while paused." : "";
   const emRule=(S.config.ema_retest && S.config.ema_retest.judgment) || "SHADOW — judged after 30 live days; drop if live expectancy <= 0 on >= 20 trades";
   $("st-ema").textContent= (em && em.signals)
-    ? "EMA-RETEST tier (shadow): "+em.signals+" · hit "+(em.hit_rate!==null? em.hit_rate+"%" : "—")+" · "+sgn(em.total_points,1)+" pts — EMA6 retest, stop at EMA91, target 1.5R. "+emRule+"."
-    : "EMA-RETEST tier (shadow): none yet — fires on EMA6 retests in a downtrend (close < EMA91 < EMA365), stop at EMA91, target 1.5R. "+emRule+".";
+    ? "EMA-RETEST tier (shadow): "+em.signals+" · hit "+(em.hit_rate!==null? em.hit_rate+"%" : "—")+" · "+sgn(em.total_points,1)+" pts — EMA6 retest, stop at EMA91, target 1.5R. "+emRule+"."+emPausedTxt
+    : "EMA-RETEST tier (shadow): none yet — fires on EMA6 retests in a downtrend (close < EMA91 < EMA365), stop at EMA91, target 1.5R. "+emRule+"."+emPausedTxt;
   renderHistory();
   /* config view */
   $("cf-conn").textContent= live? "CONNECTED" : (reconn? "RECONNECTING" : "DOWN");
@@ -490,6 +492,7 @@ function render(){
   if(emc){
     $("cf-strat").innerHTML +=
       kv("EMA-Retest Tier (Shadow)", emc.trigger+" · "+emc.trend)
+      + kv("Shadow Status", emc.enabled===false? '<span style="color:var(--red)">● PAUSED</span>' : '<span class="grn">● ACTIVE</span>')
       + kv("Shadow Stop / Target", emc.sl+" · "+emc.tp)
       + kv("Shadow Judgment", emc.judgment);
   }

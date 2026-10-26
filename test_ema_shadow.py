@@ -17,6 +17,7 @@ os.environ.setdefault("TELEGRAM_CHAT_ID", "1")
 import pytest
 
 import alerts
+import config
 import crt_engine
 import ema_shadow
 from ema_shadow import EMAShadowEngine, downtrend_c, ema_levels, is_down_spike
@@ -247,6 +248,31 @@ def test_live_entry_alert_and_record(sent):
     assert len(sent) == 1
     assert "[EMA-RETEST · SHADOW]" in sent[0]
     assert "do not trade off it" in sent[0]
+
+
+def test_disabled_flag_suppresses_live_entries(monkeypatch, sent):
+    # Paused 2026-10-26: same series as test_live_entry_alert_and_
+    # record, which fires exactly one shadow entry when enabled.
+    monkeypatch.setattr(config, "EMA_SHADOW_ENABLED", False)
+    closes = _declining_closes(420)
+    bars, _ = _bars_from_closes(closes, poke={400: 1.0})
+    bars[400]["l"] = bars[400]["c"] - 0.1
+    bars[401]["c"] = bars[400]["l"] - 1.0
+    bars[401]["o"] = bars[401]["c"] + 1.0
+    bars[401]["h"] = bars[401]["c"] + 1.2
+    bars[401]["l"] = bars[401]["c"] - 0.1
+    w = Watcher()
+    w.candles.seed(bars[:400])  # history without the setup
+    w.ema_shadow.reset()
+    w.ema_shadow.feed_many(w.candles.closed)
+    for b in bars[400:402]:
+        w.candles.closed.append(b)
+        w._on_candle_closed()
+    ema_recs = [r for r in w.signal_history
+                if r.get("tier") == "ema_retest"]
+    assert ema_recs == []
+    assert sent == []
+    assert w.status_snapshot()["config"]["ema_retest"]["enabled"] is False
 
 
 def test_snapshot_tier_split():

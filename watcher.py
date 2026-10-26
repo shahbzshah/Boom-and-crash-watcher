@@ -419,12 +419,19 @@ class Watcher:
                 log.error("CRT alert failed to send (%s).", sig["side"])
         # EMA-retest shadow tier: evaluated after CRT, in its own
         # try/except so a shadow failure can never break CRT.
-        try:
-            entry = (self.ema_shadow.feed(self.candles.closed[-1])
-                     if self.candles.closed else None)
-        except Exception as exc:
-            log.error("EMA shadow raised: %s", exc)
-            entry = None
+        # Paused when EMA_SHADOW_ENABLED is off (2026-10-26): no live
+        # bar is fed, so no shadow signal, alert, or ledger record
+        # can fire. The seed path still warms the engine (seeded bars
+        # never alert or record), so a resume via redeploy picks up
+        # clean state from seeded history.
+        entry = None
+        if config.EMA_SHADOW_ENABLED:
+            try:
+                entry = (self.ema_shadow.feed(self.candles.closed[-1])
+                         if self.candles.closed else None)
+            except Exception as exc:
+                log.error("EMA shadow raised: %s", exc)
+                entry = None
         if entry is not None:
             rec = {
                 "side": "SELL", "epoch": entry["epoch"],
@@ -614,6 +621,7 @@ class Watcher:
                 "min_consecutive": cfg["min_consecutive"],
                 "confirm_window": config.CRT_CONFIRM_WINDOW,
                 "ema_retest": {
+                    "enabled": config.EMA_SHADOW_ENABLED,
                     "label": "EMA-RETEST · SHADOW",
                     "trend": "close < EMA91 < EMA365",
                     "trigger": "EMA6 retest",

@@ -10,6 +10,15 @@ def _get(name, default, cast=str):
         return cast(default)
 
 
+def _get_bool(name, default):
+    # NOTE: bool("false") is True in Python, so a plain cast is wrong
+    # for env flags — parse explicitly.
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 # Optional: load a .env file sitting next to this code, if python-dotenv
 # is installed. Not required — plain environment variables work too.
 try:
@@ -135,6 +144,16 @@ CRT_RR = _get("CRT_RR", "2.0", float)
 # reached TP first ~47% of the time vs ~26% for all setups — a
 # precision tier for discretionary entries, not an auto-trade recipe.
 CRT_CONFIRM_WINDOW = _get("CRT_CONFIRM_WINDOW", "3", int)
+
+# --- EMA-retest shadow tier switch ---
+# Paused 2026-10-26 on Megah's call after the M5 downtrend study found
+# this tier's recipe losing on M5 in both split halves (it was
+# backtested on M1). "1"/"true"/"yes"/"on" = running (default);
+# anything else = paused: no shadow signals, alerts, or ledger
+# records. CRT and the confirmed tier are untouched. Flip it in the
+# host env and redeploy to resume — the engine re-warms from seeded
+# history at startup, so a resume needs no code change.
+EMA_SHADOW_ENABLED = _get_bool("EMA_SHADOW_ENABLED", True)
 
 
 def validate():
