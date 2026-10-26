@@ -204,12 +204,12 @@ def test_watcher_integration():
         w = watcher_mod.Watcher()
         price = 1000.0
         for i in range(300):
-            t = T0 + i * 60
+            t = T0 + i * 300  # M5 candles; same OHLC shape as before
             o, c = price, price + 2.0
             price = c
             w._on_tick(t, o)
             w._on_tick(t + 30, c)
-        w._on_tick(T0 + 300 * 60, price)  # closes candle 299
+        w._on_tick(T0 + 300 * 300, price)  # closes candle 299
         crt = [m for m in sent if "PRE-REVERSAL" in m]
         assert len(crt) == 1, f"expected 1 CRT alert, got {len(crt)}: {sent}"
         assert "PRE-REVERSAL SELL" in crt[0] and "Score: 5/5" in crt[0], crt[0]

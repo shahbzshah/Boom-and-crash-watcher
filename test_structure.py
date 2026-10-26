@@ -148,7 +148,7 @@ def test_watcher_ctx_integration():
 
     try:
         w = watcher_mod.Watcher()
-        for k in range(300):  # 10 minutes of ticks
+        for k in range(900):  # 30 minutes of ticks (M5: 6 candles)
             w._on_tick(1_700_000_000 + k * 2, 600.0 + k * 0.05)
         assert seen["candles_closed"] > 5, seen["candles_closed"]
         assert seen["trend"] in ("uptrend", "downtrend", "ranging")

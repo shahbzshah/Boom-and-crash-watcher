@@ -87,7 +87,7 @@ def test_status_snapshot_shape():
     snap = w.status_snapshot()
     assert snap["candles_closed"] == 300
     assert len(snap["candles"]) == 40
-    assert snap["config"]["timeframe"] == "M1"
+    assert snap["config"]["timeframe"] == "M5"
     assert snap["score"]["value"] >= 0
     assert snap["last_signal"] is None
     assert snap["stats"] == {"signals": 0, "tp": 0, "sl": 0, "open": 0,

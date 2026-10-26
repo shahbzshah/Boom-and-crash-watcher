@@ -78,7 +78,9 @@ ALERT_COOLDOWN_SEC = _get("ALERT_COOLDOWN_SEC", "300", int)
 TICK_BUFFER = _get("TICK_BUFFER", "5000", int)
 
 # --- Market-structure engine ---
-CANDLE_MINUTES = _get("CANDLE_MINUTES", "1", int)
+# Switched 2026-10-26 from M1 to M5 on Megah's call: M1 carries too
+# much noise. All bar-count parameters below now count M5 bars.
+CANDLE_MINUTES = _get("CANDLE_MINUTES", "5", int)
 CANDLE_KEEP = _get("CANDLE_KEEP", "1000", int)
 # Historical candles fetched from Deriv at startup so the CRT engine
 # has its ~252-bar warmup immediately (the last, still-forming candle

@@ -359,6 +359,7 @@ class Watcher:
             "tier": "confirmed", "confirmed": True,
             "setup_epoch": p["setup_epoch"],
             "explanation": None,
+            "timeframe": f"M{config.CANDLE_MINUTES}",
         }
         self.signal_history.append(rec)
         p["record"]["confirmed"] = True
@@ -404,6 +405,7 @@ class Watcher:
                 "tier": "setup", "confirmed": False,
                 "setup_epoch": None,
                 "explanation": None,
+                "timeframe": f"M{config.CANDLE_MINUTES}",
             }
             self.signal_history.append(rec)
             if self.candles.closed:
@@ -436,6 +438,7 @@ class Watcher:
                 "tier": "ema_retest", "confirmed": False,
                 "setup_epoch": None,
                 "explanation": None,
+                "timeframe": f"M{config.CANDLE_MINUTES}",
             }
             self.signal_history.append(rec)
             text = alerts.format_ema_retest_alert(
