@@ -73,6 +73,7 @@ def main():
         page_html=dashboard.PAGE,
         test_alert=_dashboard_test_alert,
         dashboard_key=config.DASHBOARD_KEY or None,
+        explain=watcher.attach_explanation,
     )
     if config.DASHBOARD_KEY:
         log.info("Dashboard data endpoints are key-locked.")

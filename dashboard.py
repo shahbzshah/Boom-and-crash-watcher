@@ -317,7 +317,7 @@ function dur(sec){ if(sec===null||sec===undefined) return "—"; sec=Math.round(
 function ago(sec){ if(sec===null||sec===undefined) return "no ping recorded yet";
   if(sec<90) return "just now"; if(sec<3600) return Math.round(sec/60)+"m ago";
   return Math.round(sec/3600)+"h ago"; }
-function esc(t){ return String(t===null||t===undefined?"":t); }
+function esc(t){ return String(t===null||t===undefined?"":t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 
 async function load(){
   try{
@@ -369,7 +369,8 @@ function histRow(r, expandable){
     +'<span class="en">'+fmt(r.entry)+'</span>'
     +(r.score===null||r.score===undefined?'':'<span style="font-size:11px" class="mut">'+r.score+'/5</span>')
     + tierHTML(r)
-    + outcomeHTML(r) +'</div>';
+    + outcomeHTML(r) +'</div>'
+    +(r.explanation?'<div class="foot mut">AI READ · '+esc(r.explanation)+'</div>':'');
   if(expandable){
     h+='<div class="hdetail"><div class="sltp">'
       +(r.setup_time_eat? '<span>SETUP <b>'+r.setup_time_eat+'</b></span>' : '')
@@ -422,6 +423,7 @@ function render(){
       +'<div class="row"><span class="eyebrow" style="color:var(--red)">LAST SIGNAL'+(ls.tier==="confirmed"?" · CONFIRMED TIER":(ls.tier==="ema_retest"?" · EMA-RETEST SHADOW":""))+'</span>'+outcomeHTML(ls)+'</div>'
       +'<div class="sigtitle">'+(ls.tier==="confirmed"?"CONFIRMED PRE-REVERSAL ":(ls.tier==="ema_retest"?"EMA-RETEST SHADOW ":"PRE-REVERSAL "))+ls.side+' — '+ls.time_eat+' EAT</div>'
       +'<div class="figures">Entry '+fmt(ls.entry)+' &nbsp;·&nbsp; SL '+fmt(ls.sl)+' &nbsp;·&nbsp; TP '+fmt(ls.tp)+'</div>'
+      +(ls.explanation?'<div class="foot mut">AI READ · '+esc(ls.explanation)+'</div>':'')
       +'<div class="foot">'+(ls.tier==="ema_retest"?"Shadow tier — backtest +2.80 expectancy on 24 trades (not proven)":("Score "+ls.score+"/5"))+(ls.duration_sec!==null&&ls.duration_sec!==undefined?(' · closed in '+dur(ls.duration_sec)):' · still open')+'</div></div>';
   } else {
     slot.innerHTML='<div class="card"><span class="eyebrow">LAST SIGNAL</span>'

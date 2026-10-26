@@ -221,6 +221,29 @@ class Watcher:
                      rec["side"], rec["outcome"].upper(),
                      rec["entry"], rec["points"])
 
+    # -- AI explanations (display only, zero decision power) -----------
+
+    def attach_explanation(self, epoch, tier, explanation):
+        """Attach a display-only AI explanation to a ledger record.
+
+        The explainer sidecar writes through POST /explain after alerts
+        have already fired. This method never touches entry, SL, TP, or
+        outcome, never overwrites an existing explanation, and never
+        creates a record. Returns (ok, error, http_status).
+        """
+        if (not isinstance(explanation, str)
+                or not 1 <= len(explanation) <= 600):
+            return (False, "explanation must be a string of 1..600 chars",
+                    400)
+        for rec in self.signal_history:
+            if rec.get("epoch") == epoch and rec.get("tier") == tier:
+                if rec.get("explanation"):
+                    return (False, "record already has an explanation",
+                            409)
+                rec["explanation"] = explanation
+                return True, "", 200
+        return False, "no matching record", 404
+
     # -- candle-close pipeline -------------------------------------------
 
     def _refresh_context(self):
@@ -335,6 +358,7 @@ class Watcher:
             "closed_epoch": None, "duration_sec": None,
             "tier": "confirmed", "confirmed": True,
             "setup_epoch": p["setup_epoch"],
+            "explanation": None,
         }
         self.signal_history.append(rec)
         p["record"]["confirmed"] = True
@@ -379,6 +403,7 @@ class Watcher:
                 "closed_epoch": None, "duration_sec": None,
                 "tier": "setup", "confirmed": False,
                 "setup_epoch": None,
+                "explanation": None,
             }
             self.signal_history.append(rec)
             if self.candles.closed:
@@ -410,6 +435,7 @@ class Watcher:
                 "closed_epoch": None, "duration_sec": None,
                 "tier": "ema_retest", "confirmed": False,
                 "setup_epoch": None,
+                "explanation": None,
             }
             self.signal_history.append(rec)
             text = alerts.format_ema_retest_alert(

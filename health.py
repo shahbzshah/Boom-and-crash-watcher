@@ -19,6 +19,9 @@ Routes (when the extras are wired in run.py):
     GET  /status.json   live dashboard data (key-gated when a
                         DASHBOARD_KEY is configured)
     POST /test-alert    send a Telegram test alert (key-gated)
+    POST /explain       attach a display-only AI explanation to a
+                        ledger record (key-gated; never touches
+                        entry/SL/TP/outcome, never overwrites)
 
 Usage (run.py):
     from health import maybe_start_health_server
@@ -48,7 +51,7 @@ def last_ping():
 
 
 def _make_handler(feed_connected, status_provider=None, page_html=None,
-                  test_alert=None, dashboard_key=None):
+                  test_alert=None, dashboard_key=None, explain=None):
     class HealthHandler(BaseHTTPRequestHandler):
         server_version = "CrashAlertHealth/1.0"
 
@@ -134,6 +137,48 @@ def _make_handler(feed_connected, status_provider=None, page_html=None,
                 self._send(200, json.dumps({"sent": sent,
                                             "detail": detail}))
                 return
+            if parts.path == "/explain" and explain is not None:
+                if not self._key_ok(parts.query):
+                    self._send(401, b'{"error": "key required"}')
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = 0
+                if length <= 0 or length > 8192:
+                    self._send(400, b'{"ok": false, '
+                                   b'"error": "bad body"}')
+                    return
+                try:
+                    payload = json.loads(self.rfile.read(length))
+                except Exception:
+                    self._send(400, b'{"ok": false, '
+                                   b'"error": "invalid JSON"}')
+                    return
+                if not isinstance(payload, dict):
+                    self._send(400, b'{"ok": false, '
+                                   b'"error": "bad body"}')
+                    return
+                epoch = payload.get("epoch")
+                tier = payload.get("tier")
+                if (isinstance(epoch, bool) or not isinstance(epoch, int)
+                        or not isinstance(tier, str)):
+                    self._send(400, b'{"ok": false, '
+                                   b'"error": "bad epoch/tier"}')
+                    return
+                try:
+                    ok, error, code = explain(
+                        epoch, tier, payload.get("explanation"))
+                except Exception as exc:  # never take the bot down
+                    log.error("explain failed: %s", exc)
+                    self._send(500, b'{"ok": false, '
+                                   b'"error": "server error"}')
+                    return
+                body = {"ok": bool(ok)}
+                if not ok:
+                    body["error"] = error
+                self._send(code, json.dumps(body))
+                return
             self._send(404, b'{"error": "not found"}')
 
         def log_message(self, *args):  # keep the bot's logs clean
@@ -144,14 +189,14 @@ def _make_handler(feed_connected, status_provider=None, page_html=None,
 
 def start(port: int, feed_connected: Optional[Callable[[], bool]] = None,
           status_provider=None, page_html=None, test_alert=None,
-          dashboard_key=None):
+          dashboard_key=None, explain=None):
     """Start the HTTP server on a background daemon thread.
 
     Returns the server instance so tests can read the bound port.
     """
     handler = _make_handler(feed_connected or (lambda: False),
                             status_provider, page_html, test_alert,
-                            dashboard_key)
+                            dashboard_key, explain)
     server = ThreadingHTTPServer(("0.0.0.0", port), handler)
     server.daemon_threads = True
     thread = threading.Thread(
@@ -165,7 +210,7 @@ def start(port: int, feed_connected: Optional[Callable[[], bool]] = None,
 def maybe_start_health_server(
     feed_connected: Optional[Callable[[], bool]] = None,
     status_provider=None, page_html=None, test_alert=None,
-    dashboard_key=None,
+    dashboard_key=None, explain=None,
 ):
     """Start the HTTP server only when PORT is set (Render free tier).
 
@@ -181,4 +226,4 @@ def maybe_start_health_server(
                     port_raw)
         return None
     return start(port, feed_connected, status_provider, page_html,
-                 test_alert, dashboard_key)
+                 test_alert, dashboard_key, explain)
