@@ -39,6 +39,16 @@ def _write(path, obj):
         json.dump(obj, f)
 
 
+def test_dockerfile_copies_snapshot():
+    """Regression guard for the first deploy of this fix: the
+    Dockerfile copied only *.py, so the snapshot never reached the
+    image and the bot started with an empty ledger."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "Dockerfile"), encoding="utf-8") as f:
+        text = f.read()
+    assert "history_snapshot.json" in text
+
+
 # -- snapshot file --------------------------------------------------------
 
 

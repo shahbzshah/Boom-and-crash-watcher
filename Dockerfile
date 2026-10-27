@@ -11,6 +11,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py ./
 
+# The ledger restore file (NOT a .py file, so the glob above would
+# silently drop it): the watcher loads it at startup so History
+# survives deploys. The sidecar refreshes it from the archive.
+COPY history_snapshot.json ./
+
 ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "run.py"]
