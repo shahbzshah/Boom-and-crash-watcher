@@ -11,6 +11,7 @@ import crt_engine
 import deriv_feed
 import ema_shadow
 import health
+import history_snapshot
 import signals
 import structure
 import alerts
@@ -30,7 +31,10 @@ def _quiet_connection_drops(loop, context):
 
 
 class Watcher:
-    def __init__(self):
+    def __init__(self, history_snapshot_path=None):
+        """history_snapshot_path: restore the ledger from this snapshot
+        file at startup. None (the default, used by tests) starts with
+        an empty ledger; run.py passes the repo's snapshot file."""
         self.ticks = deque(maxlen=config.TICK_BUFFER)  # (epoch, price)
         self.symbol = config.SYMBOL
         self.ctx = {
@@ -92,6 +96,18 @@ class Watcher:
         self.last_connect_epoch = None
         self.last_drop_epoch = None
         self.signal_history = deque(maxlen=100)
+        # History restore: the ledger is in-memory and resets on every
+        # deploy, so a snapshot file (refreshed by the explainer
+        # sidecar from the permanent archive) reloads it at startup.
+        # No file, or a bad one, starts empty — never fail startup.
+        self._confirms_restored = False
+        if history_snapshot_path:
+            restored = history_snapshot.load_snapshot(
+                history_snapshot_path)
+            if restored:
+                self.signal_history = deque(restored, maxlen=100)
+                log.info("History restored: %d record(s) from snapshot.",
+                         len(restored))
         # Confirmation tier: fired setups waiting to see whether price
         # displaces through the setup candle's extreme within
         # CRT_CONFIRM_WINDOW bars (see _process_confirmations).
@@ -189,6 +205,17 @@ class Watcher:
 
     # -- signal outcome tracking (dashboard ledger) ---------------------
 
+    def _record_if_new(self, rec):
+        """Append a ledger record unless this (epoch, tier) is already
+        recorded — e.g. a setup restored from the snapshot re-firing
+        on the boundary candle after a restart. Returns True when the
+        record was actually appended."""
+        for r in self.signal_history:
+            if r["epoch"] == rec["epoch"] and r["tier"] == rec["tier"]:
+                return False
+        self.signal_history.append(rec)
+        return True
+
     def _track_outcomes(self, epoch, price):
         """Close out open dashboard signal records whose TP or SL the
         price has reached. Points are measured to the TP/SL level
@@ -282,9 +309,11 @@ class Watcher:
 
     # -- confirmation tier -------------------------------------------------
 
-    def _arm_confirmation(self, sig, candle, record):
+    def _arm_confirmation(self, sig, candle, record, bars_seen=0):
         """Watch a freshly fired setup for displacement confirmation
-        over the next CRT_CONFIRM_WINDOW closed candles."""
+        over the next CRT_CONFIRM_WINDOW closed candles. bars_seen is
+        0 for a live firing; restored setups pass the bars that
+        already closed before the restart, so the window stays exact."""
         self._pending_confirms.append({
             "side": sig["side"],
             "setup_epoch": sig["epoch"],
@@ -294,8 +323,77 @@ class Watcher:
             "score": sig["score"], "conditions": sig["conditions"],
             "atr": sig["atr"],
             "record": record,
-            "bars_seen": 0,
+            "bars_seen": bars_seen,
         })
+
+    def _restore_confirmations(self):
+        """Re-arm confirmation watches for setup records restored from
+        the snapshot whose confirm window is still open.
+
+        Only setups whose setup candle is still in the seeded buffer
+        and whose window has not run out qualify, and only when none
+        of the bars that closed before the restart already voided the
+        setup (stop touched) or confirmed it (displacement already
+        happened — the live bot would have recorded that). Setups
+        already flagged confirmed, or with a confirmed record in the
+        ledger, are skipped. Runs once, on the first live candle close
+        after startup."""
+        closed = self.candles.closed
+        if not closed:
+            return
+        idx = {c["t"]: i for i, c in enumerate(closed)}
+        last_i = len(closed) - 1
+        confirmed_epochs = {r.get("setup_epoch")
+                            for r in self.signal_history
+                            if r.get("tier") == "confirmed"}
+        pending_epochs = {p["setup_epoch"]
+                          for p in self._pending_confirms}
+        window = config.CRT_CONFIRM_WINDOW
+        for rec in list(self.signal_history):
+            if (rec.get("tier") != "setup"
+                    or rec.get("outcome") != "open"
+                    or rec.get("confirmed")):
+                continue
+            if rec["epoch"] in confirmed_epochs:
+                continue
+            if rec["epoch"] in pending_epochs:
+                continue
+            si = idx.get(rec["epoch"])
+            if si is None:
+                continue
+            elapsed = last_i - si
+            if elapsed < 1 or elapsed > window:
+                continue
+            setup_candle = closed[si]
+            void_or_hit = False
+            for bar in closed[si + 1:last_i]:
+                if rec["side"] == "SELL":
+                    if bar["h"] >= rec["sl"]:
+                        void_or_hit = True
+                        break
+                    if (bar["c"] < bar["o"]
+                            and bar["c"] < setup_candle["l"]):
+                        void_or_hit = True
+                        break
+                else:  # BUY
+                    if bar["l"] <= rec["sl"]:
+                        void_or_hit = True
+                        break
+                    if (bar["c"] > bar["o"]
+                            and bar["c"] > setup_candle["h"]):
+                        void_or_hit = True
+                        break
+            if void_or_hit:
+                continue
+            sig = {"side": rec["side"], "epoch": rec["epoch"],
+                   "entry": rec["entry"], "sl": rec["sl"],
+                   "tp": rec["tp"], "score": rec["score"],
+                   "conditions": rec["conditions"], "atr": rec["atr"]}
+            self._arm_confirmation(sig, setup_candle, rec,
+                                   bars_seen=elapsed - 1)
+            log.info("Confirmation watch restored: %s setup at %s "
+                     "(%d of %d bars seen).",
+                     rec["side"], rec["epoch"], elapsed - 1, window)
 
     def _process_confirmations(self, bar):
         """Check pending setups against the just-closed candle.
@@ -361,8 +459,12 @@ class Watcher:
             "explanation": None,
             "timeframe": f"M{config.CANDLE_MINUTES}",
         }
-        self.signal_history.append(rec)
+        is_new = self._record_if_new(rec)
         p["record"]["confirmed"] = True
+        if not is_new:
+            log.info("Duplicate confirmed record skipped: %s at %s.",
+                     p["side"], bar["t"])
+            return
         log.warning("CRT CONFIRMED: %s setup %s displaced at %s "
                     "(entry %s, SL %s, TP %s).",
                     p["side"], p["setup_epoch"], bar["t"],
@@ -381,6 +483,9 @@ class Watcher:
         confirmation, then run the CRT engine and send any signal it
         fires straight to Telegram."""
         self._refresh_context()
+        if not self._confirms_restored and self.candles.closed:
+            self._confirms_restored = True
+            self._restore_confirmations()
         if self.candles.closed:
             self._process_confirmations(self.candles.closed[-1])
         try:
@@ -407,7 +512,10 @@ class Watcher:
                 "explanation": None,
                 "timeframe": f"M{config.CANDLE_MINUTES}",
             }
-            self.signal_history.append(rec)
+            if not self._record_if_new(rec):
+                log.info("Duplicate setup record skipped: %s at %s.",
+                         sig["side"], sig["epoch"])
+                continue
             if self.candles.closed:
                 self._arm_confirmation(sig, self.candles.closed[-1], rec)
             text = alerts.format_crt_alert(
@@ -447,14 +555,17 @@ class Watcher:
                 "explanation": None,
                 "timeframe": f"M{config.CANDLE_MINUTES}",
             }
-            self.signal_history.append(rec)
-            text = alerts.format_ema_retest_alert(
-                rec, self.symbol, f"M{config.CANDLE_MINUTES}")
-            if alerts.send_alert(text):
-                log.warning("EMA-RETEST SHADOW ALERT SENT: SELL entry %s",
-                            entry["entry"])
+            if not self._record_if_new(rec):
+                log.info("Duplicate EMA-retest record skipped at %s.",
+                         entry["epoch"])
             else:
-                log.error("EMA-retest shadow alert failed to send.")
+                text = alerts.format_ema_retest_alert(
+                    rec, self.symbol, f"M{config.CANDLE_MINUTES}")
+                if alerts.send_alert(text):
+                    log.warning("EMA-RETEST SHADOW ALERT SENT: SELL entry %s",
+                                entry["entry"])
+                else:
+                    log.error("EMA-retest shadow alert failed to send.")
 
     # -- dashboard snapshot ------------------------------------------------
 

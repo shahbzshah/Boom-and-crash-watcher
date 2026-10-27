@@ -8,6 +8,7 @@ import time
 import config
 import dashboard
 import health
+import history_snapshot
 from health import maybe_start_health_server
 from watcher import Watcher
 
@@ -64,7 +65,11 @@ def main():
         log.info("Test alert %s.", "sent" if ok else "FAILED")
         sys.exit(0 if ok else 1)
     log.info("Crash 1000 alert bot starting — signals only, no trading.")
-    watcher = Watcher()
+    # Restore the dashboard ledger from the snapshot the explainer
+    # sidecar refreshes from the permanent archive, so History
+    # survives deploys. Missing/bad snapshot starts empty, as before.
+    watcher = Watcher(
+        history_snapshot_path=history_snapshot.default_path())
     # Render free tier sets PORT; everywhere else this is a no-op.
     # The same server carries the Crash Watch dashboard.
     maybe_start_health_server(
