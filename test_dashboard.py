@@ -194,3 +194,20 @@ def test_chart_levels_only_for_open_signals():
     assert "always drawn while it is the latest" not in page
     # The EXIT marker for a closed latest signal stays.
     assert "exit marker where the latest signal closed" in page
+
+
+def test_signal_room_skin_no_invented_bits():
+    # The Stitch "Signal Room" skin: tier colours, sharp geometry, DM
+    # Sans for prose — and none of Stitch's invented numbers, features
+    # or claims may survive into the served page.
+    import dashboard
+    page = dashboard.PAGE
+    for token in ("#FFB224", "#2FCE8F", "#9B8CFF", "#FF6A5E", "#45C4F5",
+                  "DM Sans", "tc-n", "tc-c-n", "tc-e-n",
+                  "AI SIGNAL REASONING POLICY"):
+        assert token in page, token
+    for invented in ("12ms", "Pushover", "1HZ100V", "walk-forward",
+                     "sandbox", "18ms latency", "Orderbook Imbalance",
+                     "78%", "SIMULATED", "EXPORT RAW JSON", "SORT: LATEST",
+                     "1.50% equity", "Day 11 of 30"):
+        assert invented not in page, invented

@@ -1,12 +1,14 @@
 """Crash Watch dashboard page, served by health.py at GET /.
 
-The markup and styling implement Megah's Stitch design (dark ink
-trading-desk instrument: Newsreader serif + Space Mono, hairline
-panels, state colours only). All data comes from /status.json
-(+ /candles, fetched once per page load, for chart history), which
-the watcher builds from its real state — nothing on this page is
-decorative filler. The page itself holds no data, so it is safe to
-serve openly; the data endpoints are key-gated (see health.py).
+The markup and styling implement Megah's Stitch design, "Signal
+Room" (deep petrol ink, flat tier colours — amber CRT, jade
+confirmed, violet shadow, coral stops, sky live — Newsreader serif +
+Space Mono + DM Sans, zero-radius instrument panels). All data comes
+from /status.json (+ /candles, fetched once per page load, for chart
+history), which the watcher builds from its real state — nothing on
+this page is decorative filler. The page itself holds no data, so it
+is safe to serve openly; the data endpoints are key-gated (see
+health.py).
 """
 
 PAGE = r"""<!DOCTYPE html>
@@ -16,14 +18,18 @@ PAGE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Crash Watch — Crash 1000 Alert Bot</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --ink:#101312; --panel:#171B19; --panel2:#1d201f; --hair:#262C28;
-  --text:#E8E6DF; --muted:#9AA39C; --faint:#6f7770;
-  --rust:#B3402A; --green:#46A758; --red:#E5484D;
+  --ink:#0B1210; --panel:#12201B; --panel2:#0E1A16; --panel3:#162822;
+  --hair:#1C332B; --text:#C6EBDB; --paper:#F2F7F5;
+  --muted:#94ADA2; --faint:#638578;
+  --amber:#FFB224; --jade:#2FCE8F; --violet:#9B8CFF;
+  --coral:#FF6A5E; --sky:#45C4F5;
+  --green:#2FCE8F; --red:#FF6A5E; --rust:#FFB224;
   --serif:"Newsreader",Georgia,"Times New Roman",serif;
   --mono:"Space Mono",ui-monospace,"Courier New",monospace;
+  --sans:"DM Sans",system-ui,sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{background:var(--ink)}
@@ -38,18 +44,18 @@ header{position:sticky;top:0;z-index:20;background:var(--ink);
   align-items:center;justify-content:space-between}
 .brand{display:flex;align-items:center;gap:8px;font-weight:700;
   letter-spacing:.14em;font-size:13px}
-.brand .sq{width:9px;height:9px;background:var(--rust);flex:none}
+.brand .sq{width:9px;height:9px;background:var(--coral);flex:none}
 .pill{display:flex;align-items:center;gap:7px;border:1px solid var(--hair);
-  background:var(--panel);border-radius:999px;padding:5px 11px;
+  background:var(--panel);border-radius:0;padding:5px 11px;
   font-size:10px;font-weight:700;letter-spacing:.12em}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
-.dot.live{background:var(--green);animation:pulse 2s infinite}
+.dot.live{background:var(--sky);animation:pulse 2s infinite}
 .dot.down{background:var(--red)}
 @keyframes pulse{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
 .pill .clk{color:var(--muted);font-weight:400;letter-spacing:.04em}
 /* generic */
 .card{background:var(--panel);border:1px solid var(--hair);
-  border-radius:5px;padding:14px;margin-top:12px}
+  border-radius:0;padding:14px;margin-top:12px}
 .eyebrow{font-size:10px;font-weight:700;letter-spacing:.14em;
   color:var(--muted);text-transform:uppercase}
 .serif{font-family:var(--serif)}
@@ -58,10 +64,10 @@ header{position:sticky;top:0;z-index:20;background:var(--ink);
 .row{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 /* hero */
 .price{font-family:var(--serif);font-size:44px;line-height:1.05;
-  letter-spacing:-.01em;margin:6px 0 2px}
+  letter-spacing:-.01em;margin:6px 0 2px;color:var(--amber)}
 .chg{text-align:right;font-size:12px}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-.chip{border:1px solid var(--hair);background:var(--panel2);border-radius:3px;
+.chip{border:1px solid var(--hair);background:var(--panel2);border-radius:0;
   padding:4px 9px;font-size:10px;font-weight:700;letter-spacing:.1em}
 .foot{font-size:10px;color:var(--muted);letter-spacing:.03em;margin-top:10px;
   border-top:1px solid var(--hair);padding-top:9px}
@@ -70,7 +76,7 @@ header{position:sticky;top:0;z-index:20;background:var(--ink);
 canvas{width:100%;height:170px;display:block;touch-action:none;cursor:grab}
 canvas:active{cursor:grabbing}
 .liqtag{position:absolute;right:0;background:var(--ink);
-  border:1px solid var(--hair);color:var(--red);font-size:9px;
+  border:1px solid var(--hair);color:var(--violet);font-size:9px;
   padding:1px 5px;letter-spacing:.05em;transform:translateY(-50%)}
 .strip{display:flex;justify-content:space-between;border-top:1px solid var(--hair);
   padding-top:9px;margin-top:9px;font-size:11px;color:var(--muted)}
@@ -86,16 +92,16 @@ canvas:active{cursor:grabbing}
 .cond .val{color:var(--muted);font-size:12px;text-align:right}
 .cond .val b{color:var(--text);font-weight:400}
 .gauge{height:2px;background:var(--hair);margin-top:12px}
-.gauge i{display:block;height:100%;background:var(--green)}
+.gauge i{display:block;height:100%;background:var(--amber)}
 /* signal */
-.sig{border-left:3px solid var(--red)}
-.sig.buy{border-left-color:var(--green)}
+.sig{border-left:3px solid var(--amber)}
+.sig.buy{border-left-color:var(--jade)}
 .sigtitle{font-family:var(--serif);font-size:19px;font-weight:500;margin:4px 0 6px}
 .figures{font-size:13px}
-.tag{display:inline-block;border:1px solid var(--red);color:var(--red);
-  border-radius:3px;padding:0 6px;font-size:10px;font-weight:700;
+.tag{display:inline-block;border:1px solid var(--amber);color:var(--amber);
+  border-radius:0;padding:0 6px;font-size:10px;font-weight:700;
   letter-spacing:.08em;vertical-align:1px}
-.tag.buy{border-color:var(--green);color:var(--green)}
+.tag.buy{border-color:var(--jade);color:var(--jade)}
 .outcome{font-size:11px;font-weight:700;letter-spacing:.06em}
 /* history */
 .hrow{padding:11px 0;border-top:1px solid var(--hair);cursor:pointer}
@@ -104,7 +110,7 @@ canvas:active{cursor:grabbing}
 .hmain .tm{width:44px;flex:none;font-weight:700}
 .hmain .en{flex:1;font-size:14px}
 .hdetail{display:none;margin-top:10px;background:var(--panel2);
-  border:1px solid var(--hair);border-radius:4px;padding:10px}
+  border:1px solid var(--hair);border-radius:0;padding:10px}
 .hrow.open .hdetail{display:block}
 .sltp{display:flex;gap:18px;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .sltp b{color:var(--text);font-weight:400}
@@ -116,34 +122,35 @@ canvas:active{cursor:grabbing}
 .stats .num small{font-size:13px;color:var(--muted);font-weight:400}
 .fchips{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0 2px}
 .fchip{border:1px solid var(--hair);background:var(--panel);color:var(--muted);
-  border-radius:3px;padding:5px 10px;font-size:10px;font-weight:700;
+  border-radius:0;padding:5px 10px;font-size:10px;font-weight:700;
   letter-spacing:.09em;cursor:pointer;font-family:var(--mono)}
-.fchip.on{color:var(--text);border-color:var(--muted)}
+.fchip.on{color:var(--paper);border-color:var(--amber)}
 .daylab{display:flex;justify-content:space-between;margin:16px 0 2px}
 /* config */
 .kv{display:flex;justify-content:space-between;gap:14px;padding:8px 0;
   border-top:1px solid var(--hair);font-size:12px}
 .kv:first-of-type{border-top:none}
 .kv .k{color:var(--muted)}
-.kv .v{text-align:right;word-break:break-all}
-.note{background:var(--panel2);border:1px solid var(--hair);border-radius:4px;
+.kv .v{text-align:right;overflow-wrap:break-word}
+.note{background:var(--panel2);border:1px solid var(--hair);border-radius:0;
   padding:10px;font-size:11px;color:var(--muted);margin-top:12px}
-.btn{display:block;width:100%;margin-top:12px;background:var(--rust);
-  color:var(--text);border:none;border-radius:4px;padding:14px;
+.sans{font-family:var(--sans)}
+.btn{display:block;width:100%;margin-top:12px;background:var(--amber);
+  color:#0B1210;border:none;border-radius:0;padding:14px;
   font-family:var(--mono);font-size:12px;font-weight:700;
   letter-spacing:.12em;cursor:pointer;text-align:left}
 .btn small{display:block;font-weight:400;letter-spacing:.02em;
-  color:#eec9c0;font-size:10px;margin-top:2px}
+  color:#614000;font-size:10px;margin-top:2px}
 .btn:disabled{opacity:.55}
 /* nav */
 nav{position:fixed;left:0;right:0;bottom:0;background:var(--ink);
   border-top:1px solid var(--hair);z-index:20}
 .navin{max-width:430px;margin:0 auto;display:flex}
-.navin button{flex:1;background:none;border:none;color:var(--faint);
+.navin button{flex:1;background:none;border:none;border-top:2px solid transparent;color:var(--faint);
   font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.14em;
   padding:9px 0 11px;cursor:pointer;display:flex;flex-direction:column;
   align-items:center;gap:4px}
-.navin button.on{color:var(--text)}
+.navin button.on{color:var(--jade);border-top-color:var(--jade)}
 .navin svg{width:19px;height:19px;stroke:currentColor;fill:none;
   stroke-width:1.6;stroke-linecap:square}
 section.view{display:none} section.view.on{display:block}
@@ -153,14 +160,33 @@ section.view{display:none} section.view.on{display:block}
   align-items:center;justify-content:center;padding:20px}
 #lock .box{max-width:340px;width:100%}
 #lock input{width:100%;background:var(--panel);border:1px solid var(--hair);
-  color:var(--text);font-family:var(--mono);padding:12px;border-radius:4px;
+  color:var(--text);font-family:var(--mono);padding:12px;border-radius:0;
   margin:12px 0;font-size:14px}
-#lock button{width:100%;background:var(--rust);color:var(--text);border:none;
+#lock button{width:100%;background:var(--amber);color:#0B1210;border:none;
   padding:12px;font-family:var(--mono);font-weight:700;letter-spacing:.1em;
-  border-radius:4px;cursor:pointer}
+  border-radius:0;cursor:pointer}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:86px;
   background:var(--panel2);border:1px solid var(--hair);color:var(--text);
-  padding:9px 14px;border-radius:4px;font-size:12px;display:none;z-index:40}
+  padding:9px 14px;border-radius:0;font-size:12px;display:none;z-index:40}
+/* score state badge */
+#sc-state{background:var(--amber);color:#0B1210;padding:3px 8px;
+  font-size:10px;letter-spacing:.1em}
+/* tier stat cards (History) */
+.tiercards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tcard{background:var(--panel2);border:1px solid var(--hair);padding:10px 9px}
+.tcard.amber{border-color:var(--amber)}
+.tcard.jade{border-color:var(--jade)}
+.tcard.violet{border-color:var(--violet)}
+.tcard .tl{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--muted)}
+.tcard.amber .tl{color:var(--amber)} .tcard.jade .tl{color:var(--jade)}
+.tcard.violet .tl{color:var(--violet)}
+.tcard .tn{font-size:24px;font-weight:700;letter-spacing:-.02em;margin:3px 0 1px}
+.tcard .tn small{font-size:11px;color:var(--muted);font-weight:400}
+.tcard .ts{font-size:10px;color:var(--muted);line-height:1.5}
+/* history row figures */
+.figs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+.figs .fl{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--muted)}
+.figs .fv{font-size:13px;margin-top:1px}
 </style>
 </head>
 <body>
@@ -201,7 +227,7 @@ section.view{display:none} section.view.on{display:block}
 
   <div class="card">
     <div class="row">
-      <div><div class="eyebrow">SETUP ENGINE</div>
+      <div><div class="eyebrow">CRT SCORE</div>
       <div class="serif" style="font-size:21px;margin-top:2px">Exhaustion Score</div></div>
       <div class="big"><span id="sc-v">–</span> <span>/ 5</span></div>
     </div>
@@ -229,15 +255,13 @@ section.view{display:none} section.view.on{display:block}
     <div class="serif" style="font-size:27px;margin-top:3px">Signal History</div>
   </div>
   <div class="card">
-    <div class="stats">
-      <div class="cell"><div class="eyebrow">SIGNALS</div><div class="num" id="st-n">–</div></div>
-      <div class="cell"><div class="eyebrow">TP HIT RATE</div><div class="num" id="st-rate">–</div></div>
-      <div class="cell"><div class="eyebrow">TOTAL POINTS</div><div class="num" id="st-pts">–</div></div>
-      <div class="cell"><div class="eyebrow">AVG R : R</div><div class="num" id="st-rr">–</div></div>
+    <div class="tiercards">
+      <div class="tcard amber"><div class="tl">CRT SETUPS</div><div class="tn" id="tc-n">–</div><div class="ts" id="tc-s"></div></div>
+      <div class="tcard jade"><div class="tl">CONFIRMED</div><div class="tn" id="tc-c-n">–</div><div class="ts" id="tc-c-s"></div></div>
+      <div class="tcard violet"><div class="tl">EMA-RETEST</div><div class="tn" id="tc-e-n">–</div><div class="ts" id="tc-e-s"></div></div>
     </div>
-    <div class="foot" id="st-foot"></div>
-    <div class="foot" id="st-conf" style="border-top:none;padding-top:0"></div>
-    <div class="foot" id="st-ema" style="border-top:none;padding-top:0"></div>
+    <div class="foot" id="st-all"></div>
+    <div class="foot" id="st-foot" style="border-top:none;padding-top:0"></div>
   </div>
   <div class="fchips" id="fchips">
     <button class="fchip on" data-f="all">ALL</button>
@@ -276,6 +300,11 @@ section.view{display:none} section.view.on{display:block}
     <div id="cf-del" style="margin-top:6px"></div>
     <button class="btn" id="btn-test">SEND TEST ALERT<small>Dispatches a test message to Telegram</small></button>
     <div class="mut" style="font-size:10px;margin-top:8px">Use it to confirm delivery without waiting for a real signal.</div>
+  </div>
+
+  <div class="card">
+    <div class="row"><span class="eyebrow">AI SIGNAL REASONING POLICY</span></div>
+    <div class="sans" style="font-size:13px;line-height:1.55;margin-top:8px">AI explains signals only, never decides. The CRT engine triggers alerts deterministically; the AI read is display-only context posted after the signal, for human discretion.</div>
   </div>
 </section>
 
@@ -362,7 +391,7 @@ function outcomeHTML(r){
 function tagHTML(side){ return '<span class="tag'+(side==="BUY"?" buy":"")+'">'+side+'</span>'; }
 function tierHTML(r){
   if(r.tier==="confirmed") return '<span class="tag" style="border-color:var(--green);color:var(--green)">CONF</span>';
-  if(r.tier==="ema_retest") return '<span class="tag" style="border-color:var(--rust);color:var(--rust)">EMA</span>';
+  if(r.tier==="ema_retest") return '<span class="tag" style="border-color:var(--violet);color:var(--violet)">EMA</span>';
   if(r.confirmed) return '<span style="font-size:10px" class="grn">✓ CONF</span>';
   return '';
 }
@@ -374,18 +403,22 @@ function condMini(r){
   }).join("");
 }
 function histRow(r, expandable){
-  let h='<div class="hrow'+(expandable?"":"")+'" data-oc="'+r.outcome+'">'
+  const fig=(l,v,cls)=> '<div><div class="fl">'+l+'</div><div class="fv '+(cls||"")+'">'+v+'</div></div>';
+  let h='<div class="hrow" data-oc="'+r.outcome+'">'
     +'<div class="hmain"><span class="tm">'+r.time_eat+'</span>'+tagHTML(r.side)
-    +'<span class="en">'+fmt(r.entry)+'</span>'
     +(r.score===null||r.score===undefined?'':'<span style="font-size:11px" class="mut">'+r.score+'/5</span>')
     + tierHTML(r)
     + outcomeHTML(r) +'</div>'
+    +'<div class="figs">'
+    + fig("ENTRY", fmt(r.entry))
+    + fig("SL", fmt(r.sl), "red")
+    + fig("TP", fmt(r.tp), "grn")
+    + fig("R:R", r.rr?("1 : "+fmt(r.rr,1)):"—")
+    +'</div>'
     +(r.explanation?'<div class="foot mut">AI READ · '+esc(r.explanation)+'</div>':'');
   if(expandable){
     h+='<div class="hdetail"><div class="sltp">'
       +(r.setup_time_eat? '<span>SETUP <b>'+r.setup_time_eat+'</b></span>' : '')
-      +'<span>SL <b>'+fmt(r.sl)+'</b></span><span>TP <b>'+fmt(r.tp)+'</b></span>'
-      +'<span>R:R <b>'+(r.rr?("1 : "+fmt(r.rr,1)):"—")+'</b></span>'
       +'<span>TIME <b>'+dur(r.duration_sec)+'</b></span></div>'
       +(r.conditions?'<div class="condmini">'+condMini(r)+'</div>':'')+'</div>';
   }
@@ -422,16 +455,17 @@ function render(){
   $("sc-bar").style.width=(sc.value/5*100)+"%";
   $("sc-cap").textContent="Signal fires at "+sc.min+" of 5.";
   $("sc-state").textContent= sc.value>=sc.min? "AT THRESHOLD" : "ARMED — WATCHING";
-  $("sc-state").style.color= sc.value>=sc.min? "var(--red)" : "";
   $("sc-rows").innerHTML=sc.conditions.map(c=>
     '<div class="cond"><span class="mark '+(c.met?"grn":"mut")+'">'+(c.met?"✓":"—")+'</span>'
     +'<span class="lab">'+c.label+'</span>'
-    +'<span class="val"><b>'+esc(c.value)+'</b>'+(c.met?' · met':'')+'</span></div>').join("");
+    +'<span class="val"><b>'+(c.value==="met"||c.value==="waiting"?"":esc(c.value))+'</b></span>'
+    +'<span style="font-size:10px;font-weight:700;letter-spacing:.08em" class="'+(c.met?"grn":"mut")+'">'+(c.met?"MET":"PENDING")+'</span></div>').join("");
   /* last signal */
   const ls=S.last_signal, slot=$("sig-slot");
   if(ls){
-    slot.innerHTML='<div class="card sig'+(ls.side==="BUY"?" buy":"")+'">'
-      +'<div class="row"><span class="eyebrow" style="color:var(--red)">LAST SIGNAL'+(ls.tier==="confirmed"?" · CONFIRMED TIER":(ls.tier==="ema_retest"?" · EMA-RETEST SHADOW":""))+'</span>'+outcomeHTML(ls)+'</div>'
+    const tierCol= ls.tier==="confirmed"? "var(--jade)" : ls.tier==="ema_retest"? "var(--violet)" : "var(--amber)";
+    slot.innerHTML='<div class="card sig'+(ls.side==="BUY"?" buy":"")+'" style="border-left-color:'+tierCol+'">'
+      +'<div class="row"><span class="eyebrow" style="color:'+tierCol+'">LAST SIGNAL'+(ls.tier==="confirmed"?" · CONFIRMED TIER":(ls.tier==="ema_retest"?" · EMA-RETEST SHADOW":""))+'</span>'+outcomeHTML(ls)+'</div>'
       +'<div class="sigtitle">'+(ls.tier==="confirmed"?"CONFIRMED PRE-REVERSAL ":(ls.tier==="ema_retest"?"EMA-RETEST SHADOW ":"PRE-REVERSAL "))+ls.side+' — '+ls.time_eat+' EAT</div>'
       +'<div class="figures">Entry '+fmt(ls.entry)+' &nbsp;·&nbsp; SL '+fmt(ls.sl)+' &nbsp;·&nbsp; TP '+fmt(ls.tp)+'</div>'
       +(ls.explanation?'<div class="foot mut">AI READ · '+esc(ls.explanation)+'</div>':'')
@@ -445,24 +479,29 @@ function render(){
   $("m-hist").innerHTML= S.history.length? S.history.slice(0,4).map(r=>histRow(r,false)).join("")
     : '<div class="empty">No signals yet.</div>';
   $("m-foot").textContent="Host: Render · Uptime "+dur(S.system.uptime_sec)+" · Heartbeat "+(S.now_eat||"").slice(11)+" EAT";
-  /* history view */
-  $("st-n").innerHTML=S.stats.signals+'<small> executed</small>';
-  $("st-rate").innerHTML= S.stats.hit_rate!==null? fmt(S.stats.hit_rate,1)+'<small>%</small>' : "—";
-  $("st-pts").innerHTML= sgn(S.stats.total_points,1)+'<small> pts</small>';
-  $("st-pts").style.color= S.stats.total_points>0? "var(--green)" : (S.stats.total_points<0? "var(--red)":"");
-  $("st-rr").innerHTML= S.stats.avg_rr!==null? "1 : "+fmt(S.stats.avg_rr,1)+'<small> avg</small>' : "—";
-  $("st-foot").textContent="Deriv "+S.symbol+" · CRT Pre-Reversal · Sync "+(S.now_eat||"")+" EAT";
+  /* history view — tier cards, all figures from the snapshot stats */
+  const tcard=(elN, elS, t, extra)=>{
+    $(elN).textContent=t.signals;
+    $(elS).innerHTML="hit "+(t.hit_rate!==null? t.hit_rate+"%" : "—")
+      +" · "+t.tp+" TP / "+t.sl+" SL · "+sgn(t.total_points,1)+" pts"
+      +(t.open? " · "+t.open+" open" : "")+(extra||"");
+  };
+  tcard("tc-n","tc-s", S.stats,
+    S.stats.avg_rr!==null? " · avg 1:"+fmt(S.stats.avg_rr,1) : "");
   const cs=S.stats.confirmed;
-  $("st-conf").textContent= (cs && cs.signals)
-    ? "Confirmed tier: "+cs.signals+" · hit "+(cs.hit_rate!==null? cs.hit_rate+"%" : "—")+" · "+sgn(cs.total_points,1)+" pts — setups price itself confirmed within "+S.config.confirm_window+" bars."
-    : "Confirmed tier: none yet — a setup joins it when price displaces through the setup extreme within "+S.config.confirm_window+" bars.";
+  tcard("tc-c-n","tc-c-s", cs,
+    " · confirms within "+S.config.confirm_window+" bars");
   const em=S.stats.ema_retest;
   const emPaused = S.config.ema_retest && S.config.ema_retest.enabled===false;
-  const emPausedTxt = emPaused ? " · PAUSED — no new shadow signals while paused." : "";
-  const emRule=(S.config.ema_retest && S.config.ema_retest.judgment) || "SHADOW — judged after 30 live days; drop if live expectancy <= 0 on >= 20 trades";
-  $("st-ema").textContent= (em && em.signals)
-    ? "EMA-RETEST tier (shadow): "+em.signals+" · hit "+(em.hit_rate!==null? em.hit_rate+"%" : "—")+" · "+sgn(em.total_points,1)+" pts — EMA6 retest, stop at EMA91, target 1.5R. "+emRule+"."+emPausedTxt
-    : "EMA-RETEST tier (shadow): none yet — fires on EMA6 retests in a downtrend (close < EMA91 < EMA365), stop at EMA91, target 1.5R. "+emRule+"."+emPausedTxt;
+  tcard("tc-e-n","tc-e-s", em, emPaused? " · PAUSED" : " · JUDGING");
+  const allT=[S.stats, cs, em];
+  const totTp=allT.reduce((a,t)=>a+t.tp,0), totSl=allT.reduce((a,t)=>a+t.sl,0);
+  const totPts=allT.reduce((a,t)=>a+t.total_points,0);
+  const totSig=allT.reduce((a,t)=>a+t.signals,0);
+  $("st-all").textContent="ALL TIERS · "+totSig+" signals · hit "
+    +(totTp+totSl? Math.round(totTp/(totTp+totSl)*1000)/10+"%" : "—")
+    +" · "+sgn(totPts,1)+" pts";
+  $("st-foot").textContent="Deriv "+S.symbol+" · CRT Pre-Reversal · Sync "+(S.now_eat||"")+" EAT";
   renderHistory();
   /* config view */
   $("cf-conn").textContent= live? "CONNECTED" : (reconn? "RECONNECTING" : "DOWN");
@@ -569,22 +608,27 @@ function drawChart(){
     [ls.tp,ls.sl].forEach(v=>{ lo=Math.min(lo,v); hi=Math.max(hi,v); });
   const pad=(hi-lo)*0.08||1; hi+=pad; lo-=pad;
   const y=v=> H-P-((v-lo)/(hi-lo))*(H-2*P);
-  ctx.strokeStyle="#262C28"; ctx.lineWidth=1;
+  ctx.strokeStyle="#1C332B"; ctx.lineWidth=1;
   [0.33,0.66].forEach(f=>{ const yy=P+f*(H-2*P);
     ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(W,yy); ctx.stroke(); });
   const step=W/cs.length, bw=Math.max(3,step*0.55);
   cs.forEach((c,i)=>{ const x=P+i*step+step/2, up=c.c>=c.o;
-    ctx.strokeStyle= up? "#46A758":"#E5484D"; ctx.fillStyle=ctx.strokeStyle;
+    ctx.strokeStyle= up? "#2FCE8F":"#FF6A5E"; ctx.fillStyle=ctx.strokeStyle;
     ctx.beginPath(); ctx.moveTo(x,y(c.h)); ctx.lineTo(x,y(c.l)); ctx.stroke();
     const t=y(Math.max(c.o,c.c)), b=y(Math.min(c.o,c.c));
     ctx.fillRect(x-bw/2, t, bw, Math.max(2,b-t)); });
   const tag=$("liqtag");
   if(S.liquidity && S.liquidity>lo && S.liquidity<hi){
     const yy=y(S.liquidity);
-    ctx.strokeStyle="#E5484D"; ctx.setLineDash([6,5]);
+    ctx.strokeStyle="#9B8CFF"; ctx.setLineDash([6,5]);
     ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(W,yy); ctx.stroke();
     ctx.setLineDash([]);
-    tag.style.display="block"; tag.style.top=(yy/H*100)+"%";
+    /* nudge the tag below the line when a level label sits on it,
+       so the tag never covers an ENTRY/TP/SL label */
+    let off=0;
+    if(lv) [lv.entry,lv.tp1,lv.tp2,lv.sl].forEach(v=>{
+      if(Math.abs(y(v)-yy)<28) off=30; });
+    tag.style.display="block"; tag.style.top=((yy+off)/H*100)+"%";
     tag.textContent="liquidity "+fmt(S.liquidity);
   } else tag.style.display="none";
   const xOf=ep=>{ const i=cs.findIndex(c=>c.t===ep);
@@ -597,20 +641,20 @@ function drawChart(){
       ctx.setLineDash([]); ctx.lineWidth=1;
       ctx.font="700 19px 'Space Mono',monospace";
       const tw=ctx.measureText(label).width;
-      ctx.fillStyle="#101312"; ctx.fillRect(W-tw-14, yy-12, tw+10, 24);
+      ctx.fillStyle="#0B1210"; ctx.fillRect(W-tw-14, yy-12, tw+10, 24);
       ctx.fillStyle=color; ctx.fillText(label, W-tw-9, yy+7);
     };
-    hline(lv.sl, "#E5484D", [10,6], "SL "+fmt(lv.sl));
-    hline(lv.tp2, "#46A758", [], "TP2 "+fmt(lv.tp2));
-    hline(lv.tp1, "#46A758", [10,6], "TP1 "+fmt(lv.tp1));
-    hline(lv.entry, "#E8E6DF", [], "ENTRY "+fmt(lv.entry));
+    hline(lv.sl, "#FF6A5E", [10,6], "SL "+fmt(lv.sl));
+    hline(lv.tp2, "#2FCE8F", [], "TP2 "+fmt(lv.tp2));
+    hline(lv.tp1, "#2FCE8F", [10,6], "TP1 "+fmt(lv.tp1));
+    hline(lv.entry, "#F2F7F5", [], "ENTRY "+fmt(lv.entry));
     /* entry marker: faint vertical + dot on the signal bar */
     const ex=xOf(openSig.epoch);
     if(ex!==null){
-      ctx.strokeStyle="rgba(232,230,223,.35)"; ctx.setLineDash([3,6]);
+      ctx.strokeStyle="rgba(242,247,245,.35)"; ctx.setLineDash([3,6]);
       ctx.beginPath(); ctx.moveTo(ex,P); ctx.lineTo(ex,H-P); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle="#E8E6DF";
+      ctx.fillStyle="#F2F7F5";
       ctx.beginPath(); ctx.arc(ex, y(openSig.entry), 5, 0, 7); ctx.fill();
     }
     /* entry dots for any other OPEN signals inside the window */
@@ -618,7 +662,7 @@ function drawChart(){
       if(r.outcome!=="open") return;
       if(r.epoch===openSig.epoch) return;
       const x=xOf(r.epoch); if(x===null) return;
-      ctx.fillStyle="#9AA39C";
+      ctx.fillStyle="#638578";
       ctx.beginPath(); ctx.arc(x, y(r.entry), 4, 0, 7); ctx.fill();
     });
   }
@@ -627,7 +671,7 @@ function drawChart(){
     const fx=(ls.closed_epoch-cs[0].t)/tfSec();
     if(fx>=0 && fx<cs.length){
       const x=P+fx*step+step/2, yy=y(ls.outcome==="tp"? ls.tp : ls.sl);
-      const col= ls.outcome==="tp"? "#46A758":"#E5484D";
+      const col= ls.outcome==="tp"? "#2FCE8F":"#FF6A5E";
       ctx.strokeStyle=col; ctx.lineWidth=3;
       const r=8;
       ctx.beginPath();
