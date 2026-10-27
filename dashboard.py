@@ -551,16 +551,22 @@ function drawChart(){
   const hhmm=t=>eatFmt.format(new Date(t*1000)).slice(0,5);
   $("c-range").textContent=hhmm(cs[0].t)+"–"+hhmm(cs[cs.length-1].t)
     +(VIEW_EPOCH!==null?" · DRAG LEFT FOR LIVE":"");
-  /* trade levels of the latest signal — always drawn while it is the
-     latest: ENTRY, TP1 (halfway to target), TP2 (the bot's TP), SL */
+  /* trade levels follow the latest OPEN signal only — dynamic: once a
+     trade closes (TP/SL hit) its ENTRY/TP/SL lines leave the chart
+     and only its EXIT marker remains. History is newest-first, so
+     the first open record is the latest live trade. */
   const ls=S.last_signal;
+  const openSig=(S.history||[]).find(r=>r.outcome==="open") || null;
   let lv=null;
-  if(ls) lv={entry:ls.entry, tp1:ls.entry+(ls.tp-ls.entry)/2,
-             tp2:ls.tp, sl:ls.sl};
+  if(openSig) lv={entry:openSig.entry,
+             tp1:openSig.entry+(openSig.tp-openSig.entry)/2,
+             tp2:openSig.tp, sl:openSig.sl};
   let lo=Infinity, hi=-Infinity;
   cs.forEach(c=>{ lo=Math.min(lo,c.l); hi=Math.max(hi,c.h); });
   if(S.liquidity && S.liquidity>lo && S.liquidity<hi*1.02){ hi=Math.max(hi,S.liquidity); }
   if(lv) [lv.entry,lv.tp1,lv.tp2,lv.sl].forEach(v=>{ lo=Math.min(lo,v); hi=Math.max(hi,v); });
+  if(ls && (ls.outcome==="tp"||ls.outcome==="sl"))
+    [ls.tp,ls.sl].forEach(v=>{ lo=Math.min(lo,v); hi=Math.max(hi,v); });
   const pad=(hi-lo)*0.08||1; hi+=pad; lo-=pad;
   const y=v=> H-P-((v-lo)/(hi-lo))*(H-2*P);
   ctx.strokeStyle="#262C28"; ctx.lineWidth=1;
@@ -581,41 +587,43 @@ function drawChart(){
     tag.style.display="block"; tag.style.top=(yy/H*100)+"%";
     tag.textContent="liquidity "+fmt(S.liquidity);
   } else tag.style.display="none";
-  if(!lv) return;
-  const hline=(v,color,dash,label)=>{
-    const yy=y(v); if(yy<P-4||yy>H-P+4) return;
-    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash(dash||[]);
-    ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(W,yy); ctx.stroke();
-    ctx.setLineDash([]); ctx.lineWidth=1;
-    ctx.font="700 19px 'Space Mono',monospace";
-    const tw=ctx.measureText(label).width;
-    ctx.fillStyle="#101312"; ctx.fillRect(W-tw-14, yy-12, tw+10, 24);
-    ctx.fillStyle=color; ctx.fillText(label, W-tw-9, yy+7);
-  };
-  hline(lv.sl, "#E5484D", [10,6], "SL "+fmt(lv.sl));
-  hline(lv.tp2, "#46A758", [], "TP2 "+fmt(lv.tp2));
-  hline(lv.tp1, "#46A758", [10,6], "TP1 "+fmt(lv.tp1));
-  hline(lv.entry, "#E8E6DF", [], "ENTRY "+fmt(lv.entry));
   const xOf=ep=>{ const i=cs.findIndex(c=>c.t===ep);
     return i<0? null : P+i*step+step/2; };
-  /* entry marker: faint vertical + dot on the signal bar */
-  const ex=xOf(ls.epoch);
-  if(ex!==null){
-    ctx.strokeStyle="rgba(232,230,223,.35)"; ctx.setLineDash([3,6]);
-    ctx.beginPath(); ctx.moveTo(ex,P); ctx.lineTo(ex,H-P); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle="#E8E6DF";
-    ctx.beginPath(); ctx.arc(ex, y(ls.entry), 5, 0, 7); ctx.fill();
+  if(lv){
+    const hline=(v,color,dash,label)=>{
+      const yy=y(v); if(yy<P-4||yy>H-P+4) return;
+      ctx.strokeStyle=color; ctx.lineWidth=2; ctx.setLineDash(dash||[]);
+      ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(W,yy); ctx.stroke();
+      ctx.setLineDash([]); ctx.lineWidth=1;
+      ctx.font="700 19px 'Space Mono',monospace";
+      const tw=ctx.measureText(label).width;
+      ctx.fillStyle="#101312"; ctx.fillRect(W-tw-14, yy-12, tw+10, 24);
+      ctx.fillStyle=color; ctx.fillText(label, W-tw-9, yy+7);
+    };
+    hline(lv.sl, "#E5484D", [10,6], "SL "+fmt(lv.sl));
+    hline(lv.tp2, "#46A758", [], "TP2 "+fmt(lv.tp2));
+    hline(lv.tp1, "#46A758", [10,6], "TP1 "+fmt(lv.tp1));
+    hline(lv.entry, "#E8E6DF", [], "ENTRY "+fmt(lv.entry));
+    /* entry marker: faint vertical + dot on the signal bar */
+    const ex=xOf(openSig.epoch);
+    if(ex!==null){
+      ctx.strokeStyle="rgba(232,230,223,.35)"; ctx.setLineDash([3,6]);
+      ctx.beginPath(); ctx.moveTo(ex,P); ctx.lineTo(ex,H-P); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle="#E8E6DF";
+      ctx.beginPath(); ctx.arc(ex, y(openSig.entry), 5, 0, 7); ctx.fill();
+    }
+    /* entry dots for any other OPEN signals inside the window */
+    (S.history||[]).forEach(r=>{
+      if(r.outcome!=="open") return;
+      if(r.epoch===openSig.epoch) return;
+      const x=xOf(r.epoch); if(x===null) return;
+      ctx.fillStyle="#9AA39C";
+      ctx.beginPath(); ctx.arc(x, y(r.entry), 4, 0, 7); ctx.fill();
+    });
   }
-  /* entry dots for any other signals inside the window */
-  (S.history||[]).forEach(r=>{
-    if(r.epoch===ls.epoch) return;
-    const x=xOf(r.epoch); if(x===null) return;
-    ctx.fillStyle= r.outcome==="tp"? "#46A758" : r.outcome==="sl"? "#E5484D" : "#9AA39C";
-    ctx.beginPath(); ctx.arc(x, y(r.entry), 4, 0, 7); ctx.fill();
-  });
   /* exit marker where the latest signal closed (TP or SL) */
-  if((ls.outcome==="tp"||ls.outcome==="sl") && ls.closed_epoch){
+  if(ls && (ls.outcome==="tp"||ls.outcome==="sl") && ls.closed_epoch){
     const fx=(ls.closed_epoch-cs[0].t)/tfSec();
     if(fx>=0 && fx<cs.length){
       const x=P+fx*step+step/2, yy=y(ls.outcome==="tp"? ls.tp : ls.sl);

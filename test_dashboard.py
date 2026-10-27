@@ -176,3 +176,21 @@ def test_candles_route_and_key_gate():
             assert resp.status == 200
     finally:
         server.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Chart levels are dynamic: only open trades show ENTRY/TP/SL
+# ---------------------------------------------------------------------------
+
+def test_chart_levels_only_for_open_signals():
+    import dashboard
+    page = dashboard.PAGE
+    # Levels + entry marker derive from the latest OPEN record, so a
+    # closed trade's lines leave the chart the moment TP/SL hits.
+    assert 'find(r=>r.outcome==="open")' in page
+    # Entry dots skip closed records entirely.
+    assert 'if(r.outcome!=="open") return;' in page
+    # The old always-drawn behaviour is gone.
+    assert "always drawn while it is the latest" not in page
+    # The EXIT marker for a closed latest signal stays.
+    assert "exit marker where the latest signal closed" in page
