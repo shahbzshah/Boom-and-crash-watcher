@@ -211,3 +211,17 @@ def test_signal_room_skin_no_invented_bits():
                      "78%", "SIMULATED", "EXPORT RAW JSON", "SORT: LATEST",
                      "1.50% equity", "Day 11 of 30"):
         assert invented not in page, invented
+
+
+def test_chart_zoom_controls():
+    # Zoom: +/- buttons, two-pointer pinch, mouse wheel. The visible
+    # window follows ZOOM_BARS everywhere — slice, title, and pan step.
+    import dashboard
+    page = dashboard.PAGE
+    assert 'id="z-in"' in page and 'id="z-out"' in page
+    assert "ZOOM_BARS" in page
+    assert "endIdx-ZOOM_BARS" in page
+    assert "pinch" in page
+    assert 'addEventListener("wheel"' in page
+    assert "cv.width/ZOOM_BARS" in page
+    assert "cv.width/40" not in page

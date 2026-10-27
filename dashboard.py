@@ -75,6 +75,11 @@ header{position:sticky;top:0;z-index:20;background:var(--ink);
 .chartbox{position:relative;margin-top:8px}
 canvas{width:100%;height:170px;display:block;touch-action:none;cursor:grab}
 canvas:active{cursor:grabbing}
+.zbtns{display:flex;align-items:center;gap:6px}
+.zbtns button{background:var(--panel2);border:1px solid var(--hair);color:var(--text);
+  font-family:var(--mono);font-size:15px;font-weight:700;line-height:1;
+  width:26px;height:26px;cursor:pointer;padding:0;flex:none}
+.zbtns button:active{background:var(--panel3);color:var(--amber)}
 .liqtag{position:absolute;right:0;background:var(--ink);
   border:1px solid var(--hair);color:var(--violet);font-size:9px;
   padding:1px 5px;letter-spacing:.05em;transform:translateY(-50%)}
@@ -213,7 +218,7 @@ section.view{display:none} section.view.on{display:block}
   </div>
 
   <div class="card">
-    <div class="row"><span class="eyebrow" id="c-title">LAST 40 PERIODS</span><span class="eyebrow" id="c-range"></span></div>
+    <div class="row"><span class="eyebrow" id="c-title">LAST 40 PERIODS</span><span class="zbtns"><span class="eyebrow" id="c-range"></span><button id="z-out" aria-label="Zoom out">−</button><button id="z-in" aria-label="Zoom in">+</button></span></div>
     <div class="chartbox">
       <canvas id="chart" width="800" height="340"></canvas>
       <div class="liqtag" id="liqtag" style="display:none"></div>
@@ -333,6 +338,12 @@ let KEY = new URLSearchParams(location.search).get("k")
 if (KEY) localStorage.setItem("cw_key", KEY);
 let S = null, HFILTER = "all";
 let CMAP = new Map(), HIST_LOADED = false, VIEW_EPOCH = null;
+/* chart zoom: visible bars, 10–160. Survives data refreshes; the
+   window stays anchored on VIEW_EPOCH when panned, else on live. */
+let ZOOM_BARS = 40;
+const ZOOM_MIN = 10, ZOOM_MAX = 160;
+function zoomBy(f){ const nz=Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(ZOOM_BARS*f)));
+  if(nz!==ZOOM_BARS){ ZOOM_BARS=nz; drawChart(); } }
 
 const eatFmt = new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Nairobi",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
 const eatDay = new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Nairobi",day:"2-digit",month:"short",year:"numeric"});
@@ -436,7 +447,6 @@ function render(){
   $("fclock").textContent="· "+eatFmt.format(new Date())+" EAT";
   /* hero */
   $("h-sym").textContent=(S.symbol==="CRASH1000"?"CRASH 1000":S.symbol)+" · DERIV · "+S.config.timeframe;
-  $("c-title").textContent="LAST 40 "+S.config.timeframe+" PERIODS";
   $("h-price").textContent=fmt(S.price);
   if(S.change_1h){ const c=S.change_1h, up=c.abs>=0;
     $("h-chg").innerHTML='<div class="'+(up?"grn":"red")+'">'+(up?"▲ ":"▼ ")+sgn(c.abs)+' 1H</div>'
@@ -585,8 +595,9 @@ function drawChart(){
   let endIdx=all.length;
   if(VIEW_EPOCH!==null){ const fi=all.findIndex(c=>c.t===VIEW_EPOCH);
     endIdx = fi<0? all.length : fi+1; }
-  const cs=all.slice(Math.max(0,endIdx-40), endIdx);
+  const cs=all.slice(Math.max(0,endIdx-ZOOM_BARS), endIdx);
   if(!cs.length){ $("c-range").textContent=""; return; }
+  $("c-title").textContent=(VIEW_EPOCH!==null?"SHOWING ":"LAST ")+cs.length+" "+S.config.timeframe+" PERIODS";
   const hhmm=t=>eatFmt.format(new Date(t*1000)).slice(0,5);
   $("c-range").textContent=hhmm(cs[0].t)+"–"+hhmm(cs[cs.length-1].t)
     +(VIEW_EPOCH!==null?" · DRAG LEFT FOR LIVE":"");
@@ -686,10 +697,12 @@ function drawChart(){
   }
 }
 
-/* ---------- chart pan: drag to look back, drag left returns to live ---------- */
+/* ---------- chart pan + zoom: drag to look back, pinch/wheel/buttons to zoom ---------- */
 (function(){
   const cv=$("chart"); if(!cv) return;
   let dragging=false, startX=0, startIdx=0;
+  const ptrs=new Map();
+  let pinch=null; /* {dist, zoom} while two pointers are down */
   const toCanvasX=e=>{ const r=cv.getBoundingClientRect();
     return (e.clientX-r.left)*(cv.width/r.width); };
   const curIdx=()=>{ const all=allCandles();
@@ -698,23 +711,54 @@ function drawChart(){
     return fi<0? all.length-1 : fi; };
   cv.addEventListener("pointerdown", e=>{
     const all=allCandles(); if(all.length<2) return;
-    dragging=true; startX=toCanvasX(e); startIdx=curIdx();
+    ptrs.set(e.pointerId, toCanvasX(e));
     try{ cv.setPointerCapture(e.pointerId); }catch(err){}
+    if(ptrs.size===2){
+      dragging=false;
+      const xs=[...ptrs.values()];
+      pinch={dist:Math.abs(xs[0]-xs[1])||1, zoom:ZOOM_BARS};
+      return;
+    }
+    dragging=true; startX=toCanvasX(e); startIdx=curIdx();
   });
   cv.addEventListener("pointermove", e=>{
+    if(!ptrs.has(e.pointerId)) return;
+    ptrs.set(e.pointerId, toCanvasX(e));
+    if(pinch && ptrs.size>=2){
+      const xs=[...ptrs.values()];
+      const d=Math.abs(xs[0]-xs[1])||1;
+      const nz=Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(pinch.zoom*pinch.dist/d)));
+      if(nz!==ZOOM_BARS){ ZOOM_BARS=nz; drawChart(); }
+      return;
+    }
     if(!dragging) return;
     const all=allCandles(); if(all.length<2) return;
     const dx=toCanvasX(e)-startX;
-    const lo=Math.min(39, all.length-1), hi=all.length-1;
-    const idx=Math.max(lo, Math.min(hi, startIdx-Math.round(dx/(cv.width/40))));
+    const lo=Math.min(ZOOM_BARS-1, all.length-1), hi=all.length-1;
+    const idx=Math.max(lo, Math.min(hi, startIdx-Math.round(dx/(cv.width/ZOOM_BARS))));
     VIEW_EPOCH = idx>=hi? null : all[idx].t;
     drawChart();
   });
-  const end=()=>{ dragging=false; };
+  const end=e=>{
+    ptrs.delete(e.pointerId);
+    if(ptrs.size<2) pinch=null;
+    if(ptrs.size===1){
+      /* pinch ended with one finger still down: resume the drag
+         from here so the chart does not jump */
+      dragging=true; startX=[...ptrs.values()][0]; startIdx=curIdx();
+    } else dragging=false;
+  };
   cv.addEventListener("pointerup", end);
   cv.addEventListener("pointercancel", end);
   cv.addEventListener("dblclick", ()=>{ VIEW_EPOCH=null; drawChart(); });
+  cv.addEventListener("wheel", e=>{
+    e.preventDefault();
+    zoomBy(e.deltaY>0?1.25:0.8);
+  }, {passive:false});
 })();
+
+$("z-in").onclick=()=>zoomBy(0.8);
+$("z-out").onclick=()=>zoomBy(1.25);
 
 /* ---------- test alert ---------- */
 $("btn-test").onclick=async()=>{
