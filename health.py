@@ -23,6 +23,11 @@ Routes (when the extras are wired in run.py):
                         ledger record (key-gated; never touches
                         entry/SL/TP/outcome, never overwrites)
 
+Large responses (/status.json, /candles, the dashboard page) are
+gzip-compressed when the client sends Accept-Encoding: gzip; small
+responses stay plain, and clients that never ask get plain JSON
+exactly as before.
+
 Usage (run.py):
     from health import maybe_start_health_server
     watcher = Watcher()
@@ -31,6 +36,7 @@ Usage (run.py):
 """
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import os
@@ -58,9 +64,37 @@ def _make_handler(feed_connected, status_provider=None, page_html=None,
 
         # -- helpers ----------------------------------------------------
 
+        def _client_accepts_gzip(self) -> bool:
+            # Only compress when the client explicitly asks: browsers
+            # and the dashboard WebView send Accept-Encoding: gzip and
+            # decompress transparently, while clients that never ask
+            # (the Crash Watch app's HttpURLConnection poller, plain
+            # curl) keep getting plain JSON exactly as before.
+            accept = self.headers.get("Accept-Encoding", "") or ""
+            for token in accept.split(","):
+                token = token.strip().lower()
+                if token == "gzip" or token.startswith("gzip;"):
+                    if "q=0" not in token:
+                        return True
+            return False
+
         def _send(self, code, body, content_type="application/json"):
             if isinstance(body, str):
                 body = body.encode("utf-8")
+            if self._client_accepts_gzip() and len(body) >= 1024:
+                # Render's proxy intermittently truncates the large
+                # /status.json payload mid-transfer (IncompleteRead on
+                # the reader side). A gzipped ~80 KB snapshot is ~8 KB
+                # and sails through; small responses stay plain.
+                body = gzip.compress(body, compresslevel=6)
+                self.send_response(code)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+                return
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
