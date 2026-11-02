@@ -80,6 +80,7 @@ def main():
         dashboard_key=config.DASHBOARD_KEY or None,
         explain=watcher.attach_explanation,
         candles_provider=lambda: watcher.candles.closed,
+        history_provider=watcher.history_payload,
     )
     if config.DASHBOARD_KEY:
         log.info("Dashboard data endpoints are key-locked.")

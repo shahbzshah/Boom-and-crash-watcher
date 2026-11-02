@@ -18,6 +18,11 @@ Routes (when the extras are wired in run.py):
                         dashboard can show the pinger is alive
     GET  /status.json   live dashboard data (key-gated when a
                         DASHBOARD_KEY is configured)
+    GET  /history.json  compact history-only payload for the
+                        explainer sidecar's 5-minute fetch (key-
+                        gated): the raw ledger + the market context
+                        its prompt quotes, nothing else. The
+                        dashboard and the app keep using /status.json.
     POST /test-alert    send a Telegram test alert (key-gated)
     POST /explain       attach a display-only AI explanation to a
                         ledger record (key-gated; never touches
@@ -58,7 +63,7 @@ def last_ping():
 
 def _make_handler(feed_connected, status_provider=None, page_html=None,
                   test_alert=None, dashboard_key=None, explain=None,
-                  candles_provider=None):
+                  candles_provider=None, history_provider=None):
     class HealthHandler(BaseHTTPRequestHandler):
         server_version = "CrashAlertHealth/1.0"
 
@@ -149,6 +154,26 @@ def _make_handler(feed_connected, status_provider=None, page_html=None,
                 except Exception as exc:  # never take the bot down
                     log.error("status provider failed: %s", exc)
                     self._send(500, b'{"error": "status unavailable"}')
+                    return
+                self._send(200, json.dumps(payload))
+                return
+            if path == "/history.json":
+                # Compact history-only payload for the explainer
+                # sidecar's 5-minute fetch: the raw ledger plus the
+                # market context its prompt quotes, nothing else.
+                # Same key gate as /status.json; the dashboard and
+                # the Crash Watch app keep using /status.json.
+                if history_provider is None:
+                    self._send(404, b'{"error": "not found"}')
+                    return
+                if not self._key_ok(query):
+                    self._send(401, b'{"error": "key required"}')
+                    return
+                try:
+                    payload = history_provider()
+                except Exception as exc:  # never take the bot down
+                    log.error("history provider failed: %s", exc)
+                    self._send(500, b'{"error": "history unavailable"}')
                     return
                 self._send(200, json.dumps(payload))
                 return
@@ -244,14 +269,16 @@ def _make_handler(feed_connected, status_provider=None, page_html=None,
 
 def start(port: int, feed_connected: Optional[Callable[[], bool]] = None,
           status_provider=None, page_html=None, test_alert=None,
-          dashboard_key=None, explain=None, candles_provider=None):
+          dashboard_key=None, explain=None, candles_provider=None,
+          history_provider=None):
     """Start the HTTP server on a background daemon thread.
 
     Returns the server instance so tests can read the bound port.
     """
     handler = _make_handler(feed_connected or (lambda: False),
                             status_provider, page_html, test_alert,
-                            dashboard_key, explain, candles_provider)
+                            dashboard_key, explain, candles_provider,
+                            history_provider)
     server = ThreadingHTTPServer(("0.0.0.0", port), handler)
     server.daemon_threads = True
     thread = threading.Thread(
@@ -266,6 +293,7 @@ def maybe_start_health_server(
     feed_connected: Optional[Callable[[], bool]] = None,
     status_provider=None, page_html=None, test_alert=None,
     dashboard_key=None, explain=None, candles_provider=None,
+    history_provider=None,
 ):
     """Start the HTTP server only when PORT is set (Render free tier).
 
@@ -281,4 +309,5 @@ def maybe_start_health_server(
                     port_raw)
         return None
     return start(port, feed_connected, status_provider, page_html,
-                 test_alert, dashboard_key, explain, candles_provider)
+                 test_alert, dashboard_key, explain, candles_provider,
+                 history_provider)

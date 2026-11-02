@@ -121,3 +121,128 @@ def test_small_response_not_gzipped():
             "status": "ok", "feed_connected": True}
     finally:
         server.shutdown()
+
+
+# -- GET /history.json: compact history-only payload (2026-11-02) ----
+# The explainer sidecar's 5-minute fetch kept dropping to 0-byte
+# IncompleteReads even after the gzip fix, so it gets its own
+# endpoint carrying exactly what it consumes — nothing else.
+
+HISTORY_KEY = "historykey"
+
+
+def _history_rec(epoch, tier, entry=100.0):
+    return {
+        "side": "SELL", "epoch": epoch, "entry": entry,
+        "sl": entry + 5.0, "tp": entry - 7.5,
+        "score": 4, "conditions": {"sweep": True},
+        "atr": 1.0, "rr": 1.5,
+        "outcome": "open", "points": None,
+        "closed_epoch": None, "duration_sec": None,
+        "tier": tier, "confirmed": False, "setup_epoch": None,
+        "explanation": None,
+    }
+
+
+def _watcher_with_history():
+    from watcher import Watcher
+
+    w = Watcher()
+    w.signal_history.append(_history_rec(1000, "setup"))
+    w.signal_history.append(_history_rec(2000, "setup", entry=101.0))
+    w.ctx["trend"] = "downtrend"
+    w.ctx["phase"] = "distribution"
+    w.ctx["phase_direction"] = "down"
+    w.ctx["atr"] = 2.5
+    for i in range(12):  # 12 closed candles; payload keeps the last 10
+        w.candles.closed.append(
+            {"t": 1000 + i * 300, "o": 100.0, "h": 101.0,
+             "l": 99.0, "c": 100.5, "n": 5})
+    return w
+
+
+def _get_history(server, key=HISTORY_KEY):
+    headers = {}
+    if key is not None:
+        headers["X-Dash-Key"] = key
+    status, headers_out, raw = _get_raw(server, "/history.json", headers)
+    return status, headers_out, json.loads(raw.decode())
+
+
+def test_history_json_returns_compact_payload():
+    w = _watcher_with_history()
+    server = start(0, lambda: True, dashboard_key=HISTORY_KEY,
+                   history_provider=w.history_payload)
+    try:
+        status, _, body = _get_history(server)
+        assert status == 200
+        # Exactly what the sidecar consumes — no score rows, no tier
+        # stats, no config block, no last_signal duplicate.
+        assert set(body) == {"history", "trend", "phase",
+                             "phase_direction", "atr", "candles"}
+        assert body["trend"] == "downtrend"
+        assert body["phase"] == "distribution"
+        assert body["phase_direction"] == "down"
+        assert body["atr"] == 2.5
+        # Newest first, raw ledger records: no dashboard display
+        # strings (time_eat/date_eat/when_eat/setup_time_eat).
+        assert [r["epoch"] for r in body["history"]] == [2000, 1000]
+        for rec in body["history"]:
+            assert "time_eat" not in rec
+            assert "date_eat" not in rec
+            assert "when_eat" not in rec
+            assert "setup_time_eat" not in rec
+            assert rec["explanation"] is None
+        # Last 10 candles only, not the dashboard's 40.
+        assert len(body["candles"]) == 10
+        assert body["candles"][0]["t"] == 1000 + 2 * 300
+        assert body["candles"][-1]["t"] == 1000 + 11 * 300
+    finally:
+        server.shutdown()
+
+
+def test_history_json_requires_key():
+    w = _watcher_with_history()
+    server = start(0, lambda: True, dashboard_key=HISTORY_KEY,
+                   history_provider=w.history_payload)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _get_history(server, key=None)
+        assert exc.value.code == 401
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _get_history(server, key="wrong")
+        assert exc.value.code == 401
+    finally:
+        server.shutdown()
+
+
+def test_history_json_404_without_provider():
+    server = start(0, lambda: True, dashboard_key=HISTORY_KEY)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            _get_history(server)
+        assert exc.value.code == 404
+    finally:
+        server.shutdown()
+
+
+def test_history_json_gzipped_when_client_asks():
+    # Same gzip behaviour as /status.json: a client that asks gets a
+    # gzipped payload that decompresses to the exact provider dict.
+    big = {"history": [{"epoch": 1793000000 + i, "tier": "setup",
+                        "outcome": "open", "entry": 6181.5,
+                        "explanation": "x" * 200}
+                       for i in range(200)],
+           "trend": "ranging", "phase": None, "phase_direction": None,
+           "atr": 1.5, "candles": []}
+    server = start(0, lambda: True,
+                   history_provider=lambda: big)
+    try:
+        status, headers, raw = _get_raw(
+            server, "/history.json", {"Accept-Encoding": "gzip"})
+        assert status == 200
+        assert headers.get("Content-Encoding") == "gzip"
+        assert len(raw) < len(json.dumps(big).encode())
+        assert json.loads(gzip.decompress(raw).decode()) == big
+    finally:
+        server.shutdown()

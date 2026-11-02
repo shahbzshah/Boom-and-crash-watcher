@@ -583,6 +583,35 @@ class Watcher:
                 return label
         return endpoint
 
+    def history_payload(self):
+        """Compact history-only payload for the explainer sidecar.
+
+        The sidecar's 5-minute fetch needs exactly this: the raw
+        ledger records (newest first, no dashboard display strings),
+        the market context its prompt quotes, and the last 10 candle
+        closes. Nothing else — no score rows, no tier stats, no
+        config block, no last_signal duplicate, no 40-candle window,
+        and no score_detail computation. /status.json stays the
+        dashboard's endpoint; this one exists so the sidecar's
+        transfer is as small and fast as Render's proxy allows
+        (the 0-byte IncompleteRead drops of 2026-11-02 survived
+        the gzip fix, so the remaining lever is payload size).
+        ATR here is the last signal's ATR from ctx; the prompt
+        already prints n/a when it is None, and records only exist
+        once a signal has fired (which sets it).
+        """
+        closed = self.candles.closed
+        return {
+            "history": [dict(r) for r in reversed(self.signal_history)],
+            "trend": self.ctx.get("trend"),
+            "phase": self.ctx.get("phase"),
+            "phase_direction": self.ctx.get("phase_direction"),
+            "atr": self.ctx.get("atr"),
+            "candles": [{"t": c["t"], "o": c["o"], "h": c["h"],
+                         "l": c["l"], "c": c["c"]}
+                        for c in closed[-10:]],
+        }
+
     def status_snapshot(self):
         """Everything the Crash Watch dashboard renders, as one dict.
 
