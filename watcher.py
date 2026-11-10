@@ -209,10 +209,25 @@ class Watcher:
         """Append a ledger record unless this (epoch, tier) is already
         recorded — e.g. a setup restored from the snapshot re-firing
         on the boundary candle after a restart. Returns True when the
-        record was actually appended."""
+        record was actually appended.
+
+        Learning stamp (2026-11-10, Megah's go "build both in
+        shadow"): on append, stamp the market-structure read at
+        firing time — trend / phase / phase_direction from ctx —
+        onto the record, unless the record already carries them
+        (restored records keep the stamp from when they fired).
+        The archive never stored trend per signal before, so the
+        one question that matters — does trend separate winners
+        from losers? — could not be answered from the ledger. The
+        stamp changes nothing about the signal, entry, SL, TP,
+        alert, or outcome; it only records the context the trade
+        was born in, so the ledger can be learned from later."""
         for r in self.signal_history:
             if r["epoch"] == rec["epoch"] and r["tier"] == rec["tier"]:
                 return False
+        for key in ("trend", "phase", "phase_direction"):
+            if key not in rec:
+                rec[key] = self.ctx.get(key)
         self.signal_history.append(rec)
         return True
 

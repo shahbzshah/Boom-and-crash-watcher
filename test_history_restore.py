@@ -150,6 +150,44 @@ def test_record_if_new_blocks_duplicates():
     assert len(w.signal_history) == 2
 
 
+def test_record_if_new_stamps_trend_at_firing():
+    """Learning stamp (2026-11-10): every new record carries the
+    structure read at firing time, so the ledger can be learned
+    from later. A record that already carries a stamp (restored)
+    keeps its own."""
+    w = Watcher()
+    w.ctx["trend"] = "uptrend"
+    w.ctx["phase"] = "manipulation"
+    w.ctx["phase_direction"] = "bearish"
+    assert w._record_if_new(_rec(T0)) is True
+    rec = w.signal_history[0]
+    assert rec["trend"] == "uptrend"
+    assert rec["phase"] == "manipulation"
+    assert rec["phase_direction"] == "bearish"
+    # Existing stamp is never overwritten by the current ctx.
+    w.ctx["trend"] = "downtrend"
+    stamped = _rec(T0 + 60, trend="downtrend", phase="distribution",
+                   phase_direction="bullish")
+    assert w._record_if_new(stamped) is True
+    assert w.signal_history[1]["trend"] == "downtrend"
+    assert w.signal_history[1]["phase"] == "distribution"
+
+
+def test_build_snapshot_keeps_trend_stamp(tmp_path):
+    """The stamp must survive the archive -> snapshot -> restore
+    round trip, or the learning is lost on the next deploy."""
+    arch = tmp_path / "arch.jsonl"
+    line = dict(_rec(T0), trend="uptrend", phase="manipulation",
+                phase_direction="bearish", archived_at="x",
+                source="live")
+    with open(arch, "w", encoding="utf-8") as f:
+        f.write(json.dumps(line) + "\n")
+    built = history_snapshot.build_snapshot(str(arch))
+    assert built[0]["trend"] == "uptrend"
+    assert built[0]["phase"] == "manipulation"
+    assert built[0]["phase_direction"] == "bearish"
+
+
 # -- confirmation re-arm --------------------------------------------------
 
 
